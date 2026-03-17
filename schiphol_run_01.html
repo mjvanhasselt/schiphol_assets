@@ -313,12 +313,13 @@
     var locationMarker = null;
     var locationCircle = null;
     var watchId = null;
-    var routePoints = JSON.parse(localStorage.getItem('routePoints') || '[]');
+    var routePoints = [];
+    try { routePoints = JSON.parse(localStorage.getItem('routePoints') || '[]'); } catch(e) {}
     var routeLine = null;
     var locating = false;
 
     function saveRoute() {
-        localStorage.setItem('routePoints', JSON.stringify(routePoints));
+        try { localStorage.setItem('routePoints', JSON.stringify(routePoints)); } catch(e) {}
     }
 
     function updateRouteLine() {
