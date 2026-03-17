@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>inspectierondes</title>
+    <title>schiphol_run_01</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -21,7 +21,9 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
+            transition: bottom 0.35s cubic-bezier(0.32, 0.72, 0, 1);
         }
+        body.sheet-open #fab-group { bottom: calc(55vh + 100px); }
         .fab {
             width: 52px; height: 52px;
             border-radius: 50%;
@@ -292,6 +294,7 @@
     document.getElementById('sheet-handle').addEventListener('click', function() {
         sheetOpen = !sheetOpen;
         sheet.classList.toggle('open', sheetOpen);
+        document.body.classList.toggle('sheet-open', sheetOpen);
     });
 
     // =========================================================================
@@ -300,9 +303,13 @@
     var locationMarker = null;
     var locationCircle = null;
     var watchId = null;
-    var routePoints = [];
+    var routePoints = JSON.parse(localStorage.getItem('routePoints') || '[]');
     var routeLine = null;
     var locating = false;
+
+    function saveRoute() {
+        localStorage.setItem('routePoints', JSON.stringify(routePoints));
+    }
 
     function updateRouteLine() {
         if (routePoints.length < 2) return;
@@ -315,6 +322,9 @@
             }).addTo(map);
         }
     }
+
+    // Restore saved route on load
+    updateRouteLine();
 
     document.getElementById('btn-locate').addEventListener('click', function() {
         if (!navigator.geolocation) { alert('Geolocation niet beschikbaar.'); return; }
@@ -355,6 +365,7 @@
             map.panTo([lat, lon]);
             routePoints.push([lat, lon]);
             updateRouteLine();
+            saveRoute();
 
         }, function(err) {
             alert('Locatie fout: ' + err.message);
@@ -365,8 +376,11 @@
 
     // Clear route
     document.getElementById('btn-clear').addEventListener('click', function() {
+        if (routePoints.length === 0) return;
+        if (!confirm('Gereden route wissen?')) return;
         routePoints = [];
         if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        saveRoute();
     });
 
     // Layer toggle
