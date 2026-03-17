@@ -136,6 +136,18 @@
         }
 
         /* Popup style */
+        #btn-clear-route {
+            display: inline-block;
+            margin: 0 20px 12px;
+            padding: 6px 14px;
+            font-size: 13px;
+            color: #FF3B30;
+            background: #FFF0F0;
+            border: 1px solid #FFD4D4;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
         .mob-popup { font-size: 14px; line-height: 1.6; min-width: 200px; }
         .mob-popup .pop-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
         .mob-popup .pop-row { display: flex; justify-content: space-between; gap: 8px; }
@@ -152,9 +164,6 @@
     <button class="fab" id="btn-layers" title="Kaartlaag">
         <svg id="icon-layers" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
     </button>
-    <button class="fab" id="btn-clear" title="Wis gereden route">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M5 6v14a2 2 0 002 2h10a2 2 0 002-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-    </button>
     <button class="fab" id="btn-locate" title="Mijn locatie">
         <svg id="icon-locate" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
     </button>
@@ -167,6 +176,7 @@
         Assets
         <span id="asset-count">1888 punten</span>
     </div>
+    <button id="btn-clear-route">Wis gereden route</button>
     <div id="sheet-content"></div>
 </div>
 
@@ -375,7 +385,7 @@
     });
 
     // Clear route
-    document.getElementById('btn-clear').addEventListener('click', function() {
+    document.getElementById('btn-clear-route').addEventListener('click', function() {
         if (routePoints.length === 0) return;
         if (!confirm('Gereden route wissen?')) return;
         routePoints = [];
