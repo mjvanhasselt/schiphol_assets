@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Leiden Test</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+        #map { position: absolute; inset: 0; z-index: 1; }
+
+        /* Floating action buttons */
+        #fab-group {
+            position: absolute;
+            bottom: 120px;
+            right: 16px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transition: bottom 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        body.sheet-open #fab-group { bottom: calc(55vh + 100px); }
+        .fab {
+            width: 52px; height: 52px;
+            border-radius: 50%;
+            border: none;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+            font-size: 22px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .fab:active { transform: scale(0.93); }
+        #btn-locate { background: white; color: #333; }
+        #btn-locate.seeking { background: #FF9500; color: white; }
+        #btn-locate.active { background: #34C759; color: white; }
+        #btn-clear { background: white; color: #FF3B30; }
+        #btn-layers { background: white; color: #333; }
+
+        /* Bottom sheet */
+        #sheet {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            z-index: 999;
+            background: white;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+            transform: translateY(calc(100% - 72px));
+            transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        #sheet.open { transform: translateY(0); }
+
+        #sheet-handle {
+            display: flex; align-items: center; justify-content: center;
+            padding: 12px 0 8px;
+            cursor: pointer;
+        }
+        #sheet-handle::before {
+            content: '';
+            width: 36px; height: 4px;
+            background: #ddd;
+            border-radius: 2px;
+        }
+
+        #sheet-title {
+            padding: 0 20px 12px;
+            font-size: 17px; font-weight: 700; color: #111;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        #asset-count {
+            font-size: 13px; font-weight: 400; color: #888;
+        }
+
+        #sheet-content {
+            padding: 0 16px 32px;
+            overflow-y: auto;
+            max-height: 55vh;
+        }
+
+        /* Asset toggle rows */
+        .asset-row {
+            display: flex;
+            align-items: center;
+            padding: 13px 4px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .asset-row:last-child { border-bottom: none; }
+        .asset-dot {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            margin-right: 12px;
+            flex-shrink: 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .asset-label {
+            flex: 1;
+            font-size: 16px;
+            color: #111;
+        }
+        .asset-count-badge {
+            font-size: 13px;
+            color: #999;
+            margin-right: 12px;
+        }
+        .toggle {
+            width: 48px; height: 28px;
+            border-radius: 14px;
+            background: #E5E5EA;
+            position: relative;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        .toggle.on { background: #34C759; }
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            background: white;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+            transition: left 0.2s;
+        }
+        .toggle.on::after { left: 22px; }
+
+        /* Leaflet overrides for mobile */
+        .leaflet-control-zoom { display: none; }
+        .leaflet-control-layers {
+            border-radius: 12px !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2) !important;
+        }
+
+        /* Popup style */
+        #btn-clear-route {
+            display: inline-block;
+            margin: 0 20px 12px;
+            padding: 6px 14px;
+            font-size: 13px;
+            color: #FF3B30;
+            background: #FFF0F0;
+            border: 1px solid #FFD4D4;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .mob-popup { font-size: 14px; line-height: 1.6; min-width: 200px; }
+        .mob-popup .pop-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+        .mob-popup .pop-row { display: flex; justify-content: space-between; gap: 8px; }
+        .mob-popup .pop-key { color: #888; font-size: 12px; }
+        .mob-popup .pop-val { font-size: 13px; text-align: right; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Floating buttons -->
+<div id="fab-group">
+    <button class="fab" id="btn-layers" title="Kaartlaag">
+        <svg id="icon-layers" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+    </button>
+    <button class="fab" id="btn-locate" title="Mijn locatie">
+        <svg id="icon-locate" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+    </button>
+</div>
+
+<!-- Bottom sheet -->
+<div id="sheet">
+    <div id="sheet-handle"></div>
+    <div id="sheet-title">
+        Assets
+        <span id="asset-count">30 punten</span>
+    </div>
+    <button id="btn-clear-route">Wis gereden route</button>
+    <div id="sheet-content"></div>
+</div>
+
+<script>
+
+    var containers = [{"id": "L001", "type": "Verkeersbord", "lat": 52.1565, "lon": 4.4878, "source": "excel", "extra": {"straat": "Leeuwenhoekstraat", "beschrijving": "Snelheidsbord 30"}}, {"id": "L002", "type": "Paal", "lat": 52.1567, "lon": 4.4882, "source": "excel", "extra": {"straat": "Leeuwenhoekstraat", "beschrijving": "Lichtmast"}}, {"id": "L003", "type": "Afvalbak", "lat": 52.1569, "lon": 4.4886, "source": "excel", "extra": {"straat": "Leeuwenhoekstraat", "beschrijving": "Prullenbak hoek"}}, {"id": "L004", "type": "Verkeersbord", "lat": 52.1562, "lon": 4.4875, "source": "excel", "extra": {"straat": "Leeuwenhoekstraat", "beschrijving": "Voorrangsbord"}}, {"id": "L005", "type": "Obstakelbeveiliger", "lat": 52.1571, "lon": 4.489, "source": "excel", "extra": {"straat": "Leeuwenhoekstraat", "beschrijving": "Paaltje kruising"}}, {"id": "L006", "type": "Bank", "lat": 52.1568, "lon": 4.4884, "source": "excel", "extra": {"straat": "Leeuwenhoekstraat", "beschrijving": "Zitbank"}}, {"id": "H001", "type": "Verkeersbord", "lat": 52.1558, "lon": 4.487, "source": "excel", "extra": {"straat": "Hansenstraat", "beschrijving": "Eenrichtingsbord"}}, {"id": "H002", "type": "Paal", "lat": 52.1556, "lon": 4.4865, "source": "excel", "extra": {"straat": "Hansenstraat", "beschrijving": "Verkeerslicht paal"}}, {"id": "H003", "type": "Bewegwijzeringsbord", "lat": 52.156, "lon": 4.4873, "source": "excel", "extra": {"straat": "Hansenstraat", "beschrijving": "Straatnaambord"}}, {"id": "H004", "type": "Afvalbak", "lat": 52.1557, "lon": 4.4868, "source": "excel", "extra": {"straat": "Hansenstraat", "beschrijving": "Afvalbak ingang"}}, {"id": "H005", "type": "Mast", "lat": 52.1554, "lon": 4.4862, "source": "excel", "extra": {"straat": "Hansenstraat", "beschrijving": "Lantaarnpaal"}}, {"id": "H006", "type": "Verkeersbord", "lat": 52.1561, "lon": 4.4876, "source": "excel", "extra": {"straat": "Hansenstraat", "beschrijving": "Stopbord"}}, {"id": "R001", "type": "Verkeersbord", "lat": 52.1573, "lon": 4.4895, "source": "excel", "extra": {"straat": "Hoge Rijndijk", "beschrijving": "Zone 30 bord"}}, {"id": "R002", "type": "Paal", "lat": 52.1575, "lon": 4.49, "source": "excel", "extra": {"straat": "Hoge Rijndijk", "beschrijving": "Paal fietspad"}}, {"id": "R003", "type": "Bewegwijzeringsbord", "lat": 52.1574, "lon": 4.4898, "source": "excel", "extra": {"straat": "Hoge Rijndijk", "beschrijving": "Richtingbord centrum"}}, {"id": "R004", "type": "Meubilair", "lat": 52.1576, "lon": 4.4903, "source": "excel", "extra": {"straat": "Hoge Rijndijk", "beschrijving": "Fietsenrek"}}, {"id": "R005", "type": "Obstakelbeveiliger", "lat": 52.1572, "lon": 4.4892, "source": "excel", "extra": {"straat": "Hoge Rijndijk", "beschrijving": "Betonblok"}}, {"id": "G001", "type": "Verkeersbord", "lat": 52.1552, "lon": 4.486, "source": "excel", "extra": {"straat": "Langegracht", "beschrijving": "Parkeerverbod"}}, {"id": "G002", "type": "Afvalbak", "lat": 52.155, "lon": 4.4857, "source": "excel", "extra": {"straat": "Langegracht", "beschrijving": "Afvalbak brug"}}, {"id": "G003", "type": "Paal", "lat": 52.1553, "lon": 4.4863, "source": "excel", "extra": {"straat": "Langegracht", "beschrijving": "Verkeerspaal"}}, {"id": "G004", "type": "Bank", "lat": 52.1551, "lon": 4.4858, "source": "excel", "extra": {"straat": "Langegracht", "beschrijving": "Zitbank gracht"}}, {"id": "V001", "type": "Verkeersbord", "lat": 52.1578, "lon": 4.488, "source": "excel", "extra": {"straat": "Plantsoen", "beschrijving": "Voetgangersbord"}}, {"id": "V002", "type": "Mast", "lat": 52.158, "lon": 4.4888, "source": "excel", "extra": {"straat": "Plantsoen", "beschrijving": "Vlaggemast"}}, {"id": "V003", "type": "Paal", "lat": 52.1575, "lon": 4.4872, "source": "excel", "extra": {"straat": "Plantsoen", "beschrijving": "Informatiepaal"}}, {"id": "V004", "type": "Afvalbak", "lat": 52.1582, "lon": 4.4885, "source": "excel", "extra": {"straat": "Plantsoen", "beschrijving": "Afvalbak park"}}, {"id": "V005", "type": "Meubilair", "lat": 52.1577, "lon": 4.4877, "source": "excel", "extra": {"straat": "Plantsoen", "beschrijving": "Picknicktafel"}}, {"id": "V006", "type": "Verkeersbord", "lat": 52.1583, "lon": 4.4893, "source": "excel", "extra": {"straat": "Levendaal", "beschrijving": "Fietsbord"}}, {"id": "V007", "type": "Obstakelbeveiliger", "lat": 52.1548, "lon": 4.487, "source": "excel", "extra": {"straat": "Nieuwe Rijn", "beschrijving": "Antiparkeerpaal"}}, {"id": "V008", "type": "Paal", "lat": 52.1578, "lon": 4.4908, "source": "excel", "extra": {"straat": "Wassenaarseweg", "beschrijving": "Lantaarnpaal"}}, {"id": "V009", "type": "Bewegwijzeringsbord", "lat": 52.158, "lon": 4.4912, "source": "excel", "extra": {"straat": "Wassenaarseweg", "beschrijving": "Wijkbord"}}];
+    var polygonCoords = [[[[52.1545, 4.4855], [52.1545, 4.492], [52.159, 4.492], [52.159, 4.4855], [52.1545, 4.4855]]]];
+
+    // =========================================================================
+    // Map init
+    // =========================================================================
+    var map = L.map('map', { zoomControl: false }).setView([52.325, 4.761], 14);
+
+    var osmLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd'
+    }).addTo(map);
+
+    var aerialLayer = L.tileLayer(
+        'https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
+        { maxZoom: 19, attribution: '&copy; PDOK Luchtfoto' }
+    );
+
+    // Draw polygon boundary on map
+    var allPoints = [];
+    polygonCoords.forEach(function(rings) {
+        rings.forEach(function(ring) {
+            ring.forEach(function(p) { allPoints.push(p); });
+            L.polyline(ring.concat([ring[0]]), {
+                color: '#2266cc', weight: 2.5, opacity: 0.6,
+                dashArray: '8,6', fill: false
+            }).addTo(map);
+        });
+    });
+    if (allPoints.length > 0) {
+        map.fitBounds(L.latLngBounds(allPoints), { padding: [20, 20] });
+    }
+
+    // =========================================================================
+    // Container (asset) layers
+    // =========================================================================
+    var CONTAINER_COLORS = {
+        'Verkeersbord':        '#E53935',
+        'Paal':                '#FB8C00',
+        'Bewegwijzeringsbord': '#8E24AA',
+        'Obstakelbeveiliger':  '#1E88E5',
+        'Afvalbak':            '#43A047',
+        'Bank':                '#F4511E',
+        'Meubilair':           '#00ACC1',
+        'Mast':                '#6D4C41'
+    };
+
+    var containerLayers = {};
+    var containerCounts = {};
+    var containerVisible = {};
+
+    containers.forEach(function(c) {
+        var t = c.type || 'onbekend';
+        if (!containerLayers[t]) {
+            containerLayers[t] = L.layerGroup().addTo(map);
+            containerCounts[t] = 0;
+            containerVisible[t] = true;
+        }
+        containerCounts[t]++;
+
+        var color = CONTAINER_COLORS[t] || '#999';
+        var m = L.circleMarker([c.lat, c.lon], {
+            radius: 5, color: 'white', fillColor: color,
+            fillOpacity: 0.9, weight: 1.5
+        });
+
+        var html = '<div class="mob-popup"><div class="pop-title">' + t + '</div>';
+        if (c.extra) {
+            for (var k in c.extra) {
+                if (c.extra[k] !== null && c.extra[k] !== '') {
+                    html += '<div class="pop-row"><span class="pop-key">' + k + '</span><span class="pop-val">' + c.extra[k] + '</span></div>';
+                }
+            }
+        }
+        html += '<div class="pop-row"><span class="pop-key">lat/lon</span><span class="pop-val">' + c.lat.toFixed(5) + ', ' + c.lon.toFixed(5) + '</span></div>';
+        html += '</div>';
+        m.bindPopup(html);
+        containerLayers[t].addLayer(m);
+    });
+
+    // =========================================================================
+    // Bottom sheet: asset toggles
+    // =========================================================================
+    var sheetContent = document.getElementById('sheet-content');
+
+    Object.keys(containerLayers).forEach(function(type) {
+        var color = CONTAINER_COLORS[type] || '#999';
+        var count = containerCounts[type];
+
+        var row = document.createElement('div');
+        row.className = 'asset-row';
+        row.innerHTML =
+            '<div class="asset-dot" style="background:' + color + '"></div>' +
+            '<div class="asset-label">' + type + '</div>' +
+            '<div class="asset-count-badge">' + count + '</div>' +
+            '<div class="toggle on" data-type="' + type + '"></div>';
+
+        row.addEventListener('click', function() {
+            var toggle = row.querySelector('.toggle');
+            var t = toggle.dataset.type;
+            containerVisible[t] = !containerVisible[t];
+            toggle.classList.toggle('on', containerVisible[t]);
+            if (containerVisible[t]) {
+                containerLayers[t].addTo(map);
+            } else {
+                map.removeLayer(containerLayers[t]);
+            }
+        });
+
+        sheetContent.appendChild(row);
+    });
+
+    // =========================================================================
+    // Bottom sheet open/close
+    // =========================================================================
+    var sheet = document.getElementById('sheet');
+    var sheetOpen = false;
+
+    document.getElementById('sheet-handle').addEventListener('click', function() {
+        sheetOpen = !sheetOpen;
+        sheet.classList.toggle('open', sheetOpen);
+        document.body.classList.toggle('sheet-open', sheetOpen);
+    });
+
+    // =========================================================================
+    // GPS & Route tracking
+    // =========================================================================
+    var locationMarker = null;
+    var locationCircle = null;
+    var watchId = null;
+    var routePoints = [];
+    try {
+        var saved = JSON.parse(localStorage.getItem('routePoints') || '[]');
+        // Migrate old [lat,lon] format to {lat,lon,t} format
+        routePoints = saved.map(function(p) {
+            if (Array.isArray(p)) return {lat: p[0], lon: p[1], t: 0};
+            return p;
+        });
+    } catch(e) {}
+    var routeLine = null;
+    var locating = false;
+
+    function saveRoute() {
+        try { localStorage.setItem('routePoints', JSON.stringify(routePoints)); } catch(e) {}
+    }
+
+    function haversineM(lat1, lon1, lat2, lon2) {
+        var R = 6371000;
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function updateRouteLine() {
+        if (routePoints.length < 2) return;
+        var coords = routePoints.map(function(p) { return [p.lat, p.lon]; });
+        if (routeLine) {
+            routeLine.setLatLngs(coords);
+        } else {
+            routeLine = L.polyline(coords, {
+                color: '#FF3B30', weight: 4,
+                opacity: 0.85, lineJoin: 'round', lineCap: 'round'
+            }).addTo(map);
+        }
+    }
+
+    // Restore saved route on load
+    updateRouteLine();
+
+    document.getElementById('btn-locate').addEventListener('click', function() {
+        if (!navigator.geolocation) { alert('Geolocation niet beschikbaar.'); return; }
+        var btn = this;
+
+        if (locating) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+            locating = false;
+            btn.classList.remove('active', 'seeking');
+            if (locationMarker) { map.removeLayer(locationMarker); locationMarker = null; }
+            if (locationCircle) { map.removeLayer(locationCircle); locationCircle = null; }
+            return;
+        }
+
+        locating = true;
+        btn.classList.add('seeking');
+        var gpsStartTime = Date.now();
+
+        watchId = navigator.geolocation.watchPosition(function(pos) {
+            var lat = pos.coords.latitude;
+            var lon = pos.coords.longitude;
+            var acc = pos.coords.accuracy;
+
+            // First fix: switch from seeking (orange) to active (green)
+            btn.classList.remove('seeking');
+            btn.classList.add('active');
+
+            if (locationMarker) {
+                locationMarker.setLatLng([lat, lon]);
+                locationCircle.setLatLng([lat, lon]).setRadius(acc);
+            } else {
+                locationMarker = L.circleMarker([lat, lon], {
+                    radius: 10, color: '#fff', weight: 2.5,
+                    fillColor: '#007AFF', fillOpacity: 1,
+                    zIndexOffset: 1000
+                }).addTo(map);
+                locationCircle = L.circle([lat, lon], {
+                    radius: acc, color: '#007AFF',
+                    fillColor: '#007AFF', fillOpacity: 0.1, weight: 1
+                }).addTo(map);
+                map.setView([lat, lon], 17);
+            }
+
+            map.panTo([lat, lon]);
+
+            // Filter: alleen goede punten toevoegen aan route
+            var dominated = false;
+            if (Date.now() - gpsStartTime < 5000) dominated = true;
+            if (!dominated && acc > 25) dominated = true;
+            if (!dominated && routePoints.length > 0) {
+                var last = routePoints[routePoints.length - 1];
+                var dist = haversineM(last.lat, last.lon, lat, lon);
+                var dt = (pos.timestamp - last.t) / 1000;
+                if (dt > 0 && dist / dt > 11) dominated = true;
+                if (!dominated && dist < 3) dominated = true;
+            }
+            if (!dominated) {
+                routePoints.push({lat: lat, lon: lon, t: pos.timestamp});
+                updateRouteLine();
+                saveRoute();
+            }
+
+        }, function(err) {
+            alert('Locatie fout: ' + err.message);
+            locating = false;
+            btn.classList.remove('active', 'seeking');
+        }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
+    });
+
+    // Clear route
+    document.getElementById('btn-clear-route').addEventListener('click', function() {
+        if (routePoints.length === 0) return;
+        if (!confirm('Gereden route wissen?')) return;
+        routePoints = [];
+        if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        saveRoute();
+    });
+
+    // Layer toggle
+    var showingAerial = false;
+    document.getElementById('btn-layers').addEventListener('click', function() {
+        if (showingAerial) {
+            map.removeLayer(aerialLayer);
+            osmLayer.addTo(map);
+        } else {
+            map.removeLayer(osmLayer);
+            aerialLayer.addTo(map);
+        }
+        showingAerial = !showingAerial;
+        // Toggle icon opacity to indicate active state
+        this.style.opacity = showingAerial ? '0.7' : '1';
+    });
+
+</script>
+</body>
+</html>
