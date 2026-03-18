@@ -315,7 +315,14 @@
     var locationCircle = null;
     var watchId = null;
     var routePoints = [];
-    try { routePoints = JSON.parse(localStorage.getItem('routePoints') || '[]'); } catch(e) {}
+    try {
+        var saved = JSON.parse(localStorage.getItem('routePoints') || '[]');
+        // Migrate old [lat,lon] format to {lat,lon,t} format
+        routePoints = saved.map(function(p) {
+            if (Array.isArray(p)) return {lat: p[0], lon: p[1], t: 0};
+            return p;
+        });
+    } catch(e) {}
     var routeLine = null;
     var locating = false;
 
