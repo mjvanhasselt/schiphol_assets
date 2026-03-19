@@ -514,17 +514,18 @@
             if (locationCircle) { map.removeLayer(locationCircle); locationCircle = null; }
             // Release wake lock
             if (wakeLock) { wakeLock.release().catch(function(){}); wakeLock = null; }
-            // Toast
-            var toast = document.getElementById('toast');
-            toast.textContent = 'Rit afgerond \u2014 ' + visited.size + ' van ' + containers.length + ' assets bezocht';
-            toast.classList.add('show');
-            setTimeout(function() { toast.classList.remove('show'); }, 4000);
+            // Toast — alleen tonen als er iets is opgenomen
+            if (routePoints.length > 0 || visited.size > 0) {
+                var toast = document.getElementById('toast');
+                toast.textContent = 'GPS gestopt \u2014 ' + visited.size + ' van ' + containers.length + ' assets bezocht';
+                toast.classList.add('show');
+                setTimeout(function() { toast.classList.remove('show'); }, 4000);
+            }
             return;
         }
 
         locating = true;
         btn.classList.add('seeking');
-        document.getElementById('rec-dot').classList.add('active');
         var gpsStartTime = Date.now();
 
         // Wake lock — keep screen on
@@ -540,6 +541,7 @@
             // First fix: switch from seeking (orange) to active (green)
             btn.classList.remove('seeking');
             btn.classList.add('active');
+            document.getElementById('rec-dot').classList.add('active');
 
             if (locationMarker) {
                 locationMarker.setLatLng([lat, lon]);
