@@ -514,13 +514,11 @@
             if (locationCircle) { map.removeLayer(locationCircle); locationCircle = null; }
             // Release wake lock
             if (wakeLock) { wakeLock.release().catch(function(){}); wakeLock = null; }
-            // Toast — alleen tonen als er iets is opgenomen
-            if (routePoints.length > 0 || visited.size > 0) {
-                var toast = document.getElementById('toast');
-                toast.textContent = 'GPS gestopt \u2014 ' + visited.size + ' van ' + containers.length + ' assets bezocht';
-                toast.classList.add('show');
-                setTimeout(function() { toast.classList.remove('show'); }, 4000);
-            }
+            // Toast
+            var toast = document.getElementById('toast');
+            toast.textContent = 'GPS gestopt \u2014 ' + visited.size + ' van ' + containers.length + ' assets bezocht';
+            toast.classList.add('show');
+            setTimeout(function() { toast.classList.remove('show'); }, 4000);
             return;
         }
 
