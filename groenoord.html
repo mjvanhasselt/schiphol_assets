@@ -242,6 +242,7 @@
 
 <div id="map"></div>
 <div id="rec-dot"></div>
+<div style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(0,0,0,0.25);pointer-events:none;">5d85b25</div>
 <div id="visit-counter"></div>
 <div id="toast"></div>
 <div id="resume-toast">
@@ -335,7 +336,7 @@
 
     function updateVisitCounter() {
         var km = (totalDistanceM / 1000).toFixed(1);
-        document.getElementById('visit-counter').textContent = '\u2713 ' + visited.size + ' / ' + containers.length + '  |  ' + km + ' km  |  5d85b25';
+        document.getElementById('visit-counter').textContent = '\u2713 ' + visited.size + ' / ' + containers.length + '  |  ' + km + ' km';
     }
 
     containers.forEach(function(c) {
