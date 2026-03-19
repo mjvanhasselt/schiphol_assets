@@ -242,7 +242,7 @@
 
 <div id="map"></div>
 <div id="rec-dot"></div>
-<div style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(0,0,0,0.25);pointer-events:none;">876a816</div>
+<div style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(0,0,0,0.25);pointer-events:none;">558b0f9</div>
 <div id="visit-counter"></div>
 <div id="toast"></div>
 <div id="resume-toast">
@@ -426,6 +426,8 @@
     var routeLine = null;
     var locating = false;
     var wakeLock = null;
+    var lastGpsLat = null;
+    var lastGpsLon = null;
 
     function saveRoute() {
         try { localStorage.setItem('routePoints', JSON.stringify(routePoints)); } catch(e) {}
@@ -596,15 +598,15 @@
                 saveRoute();
             }
 
-            // Visit detection: check proximity to line segment from previous to current position
+            // Visit detection: check proximity to line segment from last GPS position to current
             if (acc <= 25) {
-                var prevLat = (routePoints.length >= 2) ? routePoints[routePoints.length - 2].lat : lat;
-                var prevLon = (routePoints.length >= 2) ? routePoints[routePoints.length - 2].lon : lon;
+                var pLat = (lastGpsLat !== null) ? lastGpsLat : lat;
+                var pLon = (lastGpsLon !== null) ? lastGpsLon : lon;
                 var changed = false;
                 for (var i = 0; i < markerIndex.length; i++) {
                     var mi = markerIndex[i];
                     if (visited.has(mi.id)) continue;
-                    var d = distToSegmentM(mi.lat, mi.lon, prevLat, prevLon, lat, lon);
+                    var d = distToSegmentM(mi.lat, mi.lon, pLat, pLon, lat, lon);
                     if (d <= 8) {
                         visited.add(mi.id);
                         mi.marker.setStyle({fillColor: VISITED_COLOR});
@@ -616,6 +618,8 @@
                     saveVisited();
                 }
             }
+            lastGpsLat = lat;
+            lastGpsLon = lon;
 
         }, function(err) {
             alert('Locatie fout: ' + err.message);
