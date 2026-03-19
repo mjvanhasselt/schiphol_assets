@@ -270,7 +270,6 @@
     <button id="btn-clear-route">Wis gereden route</button>
     <div id="sheet-content"></div>
 </div>
-<div style="position:absolute;bottom:4px;left:8px;z-index:998;font-size:10px;color:rgba(0,0,0,0.3);pointer-events:none;">5d85b25 BGT data source: assets ophalen van PDOK API zonder Excel, --bgt flag</div>
 
 <script>
 
@@ -336,7 +335,7 @@
 
     function updateVisitCounter() {
         var km = (totalDistanceM / 1000).toFixed(1);
-        document.getElementById('visit-counter').textContent = '\u2713 ' + visited.size + ' / ' + containers.length + '   |   ' + km + ' km';
+        document.getElementById('visit-counter').textContent = '\u2713 ' + visited.size + ' / ' + containers.length + '  |  ' + km + ' km  |  5d85b25';
     }
 
     containers.forEach(function(c) {
