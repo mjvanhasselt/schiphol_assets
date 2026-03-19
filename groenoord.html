@@ -474,6 +474,19 @@
         document.getElementById('resume-toast').classList.add('show');
     }
 
+    function distToSegmentM(pLat, pLon, aLat, aLon, bLat, bLon) {
+        // Shortest distance from point P to line segment A-B (in meters)
+        // Project P onto AB, clamp to segment, return haversine distance
+        var dxAB = bLon - aLon, dyAB = bLat - aLat;
+        var dxAP = pLon - aLon, dyAP = pLat - aLat;
+        var lenSq = dxAB * dxAB + dyAB * dyAB;
+        if (lenSq === 0) return haversineM(pLat, pLon, aLat, aLon);
+        var t = Math.max(0, Math.min(1, (dxAP * dxAB + dyAP * dyAB) / lenSq));
+        var projLat = aLat + t * dyAB;
+        var projLon = aLon + t * dxAB;
+        return haversineM(pLat, pLon, projLat, projLon);
+    }
+
     function haversineM(lat1, lon1, lat2, lon2) {
         var R = 6371000;
         var dLat = (lat2 - lat1) * Math.PI / 180;
@@ -582,13 +595,15 @@
                 saveRoute();
             }
 
-            // Visit detection: check proximity to all assets
+            // Visit detection: check proximity to line segment from previous to current position
             if (acc <= 25) {
+                var prevLat = (routePoints.length >= 2) ? routePoints[routePoints.length - 2].lat : lat;
+                var prevLon = (routePoints.length >= 2) ? routePoints[routePoints.length - 2].lon : lon;
                 var changed = false;
                 for (var i = 0; i < markerIndex.length; i++) {
                     var mi = markerIndex[i];
                     if (visited.has(mi.id)) continue;
-                    var d = haversineM(lat, lon, mi.lat, mi.lon);
+                    var d = distToSegmentM(mi.lat, mi.lon, prevLat, prevLon, lat, lon);
                     if (d <= 8) {
                         visited.add(mi.id);
                         mi.marker.setStyle({fillColor: VISITED_COLOR});
@@ -605,7 +620,7 @@
             alert('Locatie fout: ' + err.message);
             locating = false;
             btn.classList.remove('active', 'seeking');
-        }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
+        }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
     });
 
     // Clear route
