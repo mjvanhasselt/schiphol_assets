@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>groenoord</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+        #map { position: absolute; inset: 0; z-index: 1; }
+
+        /* Floating action buttons */
+        #fab-group {
+            position: absolute;
+            bottom: 120px;
+            right: 16px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transition: bottom 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        body.sheet-open #fab-group { bottom: calc(55vh + 100px); }
+        .fab {
+            width: 52px; height: 52px;
+            border-radius: 50%;
+            border: none;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+            font-size: 22px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .fab:active { transform: scale(0.93); }
+        #btn-locate { background: white; color: #333; }
+        #btn-locate.seeking { background: #FF9500; color: white; }
+        #btn-locate.active { background: #34C759; color: white; }
+        #btn-clear { background: white; color: #FF3B30; }
+        #btn-layers { background: white; color: #333; }
+
+        /* Bottom sheet */
+        #sheet {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            z-index: 999;
+            background: white;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+            transform: translateY(calc(100% - 72px));
+            transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        #sheet.open { transform: translateY(0); }
+
+        #sheet-handle {
+            display: flex; align-items: center; justify-content: center;
+            padding: 12px 0 8px;
+            cursor: pointer;
+        }
+        #sheet-handle::before {
+            content: '';
+            width: 36px; height: 4px;
+            background: #ddd;
+            border-radius: 2px;
+        }
+
+        #sheet-title {
+            padding: 0 20px 12px;
+            font-size: 17px; font-weight: 700; color: #111;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        #asset-count {
+            font-size: 13px; font-weight: 400; color: #888;
+        }
+
+        #sheet-content {
+            padding: 0 16px 32px;
+            overflow-y: auto;
+            max-height: 55vh;
+        }
+
+        /* Asset toggle rows */
+        .asset-row {
+            display: flex;
+            align-items: center;
+            padding: 13px 4px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .asset-row:last-child { border-bottom: none; }
+        .asset-dot {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            margin-right: 12px;
+            flex-shrink: 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .asset-label {
+            flex: 1;
+            font-size: 16px;
+            color: #111;
+        }
+        .asset-count-badge {
+            font-size: 13px;
+            color: #999;
+            margin-right: 12px;
+        }
+        .toggle {
+            width: 48px; height: 28px;
+            border-radius: 14px;
+            background: #E5E5EA;
+            position: relative;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        .toggle.on { background: #34C759; }
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            background: white;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+            transition: left 0.2s;
+        }
+        .toggle.on::after { left: 22px; }
+
+        /* Leaflet overrides for mobile */
+        .leaflet-control-zoom { display: none; }
+        .leaflet-control-layers {
+            border-radius: 12px !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2) !important;
+        }
+
+        /* Popup style */
+        #btn-clear-route {
+            display: inline-block;
+            margin: 0 20px 12px;
+            padding: 6px 14px;
+            font-size: 13px;
+            color: #FF3B30;
+            background: #FFF0F0;
+            border: 1px solid #FFD4D4;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        /* Visit counter */
+        #visit-counter {
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 15px;
+            font-weight: 600;
+            pointer-events: none;
+        }
+
+        /* Toast */
+        #toast {
+            position: absolute;
+            bottom: 140px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1100;
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        #toast.show { opacity: 1; }
+
+        /* Resume toast */
+        #resume-toast {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1200;
+            background: white;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            text-align: center;
+            display: none;
+        }
+        #resume-toast.show { display: block; }
+        #resume-toast p { font-size: 15px; color: #333; margin-bottom: 16px; }
+        #resume-toast button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 0 6px;
+        }
+        #resume-toast .btn-continue { background: #34C759; color: white; }
+        #resume-toast .btn-new { background: #E5E5EA; color: #333; }
+
+        /* Recording indicator */
+        #rec-dot {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            z-index: 1000;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #FF3B30;
+            display: none;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        #rec-dot.active { display: block; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .mob-popup { font-size: 14px; line-height: 1.6; min-width: 200px; }
+        .mob-popup .pop-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+        .mob-popup .pop-row { display: flex; justify-content: space-between; gap: 8px; }
+        .mob-popup .pop-key { color: #888; font-size: 12px; }
+        .mob-popup .pop-val { font-size: 13px; text-align: right; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="rec-dot"></div>
+<div id="visit-counter"></div>
+<div id="toast"></div>
+<div id="resume-toast">
+    <p>Vorige rit gevonden.<br>Doorgaan of nieuwe rit?</p>
+    <button class="btn-continue" onclick="resumeRit(true)">Doorgaan</button>
+    <button class="btn-new" onclick="resumeRit(false)">Nieuwe rit</button>
+</div>
+
+<!-- Floating buttons -->
+<div id="fab-group">
+    <button class="fab" id="btn-layers" title="Kaartlaag">
+        <svg id="icon-layers" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+    </button>
+    <button class="fab" id="btn-locate" title="Mijn locatie">
+        <svg id="icon-locate" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+    </button>
+</div>
+
+<!-- Bottom sheet -->
+<div id="sheet">
+    <div id="sheet-handle"></div>
+    <div id="sheet-title">
+        Assets
+        <span id="asset-count">0 punten</span>
+    </div>
+    <button id="btn-clear-route">Wis gereden route</button>
+    <div id="sheet-content"></div>
+</div>
+
+<script>
+
+    var containers = [];
+    var polygonCoords = [[[[52.169059, 4.490764], [52.168362, 4.49034], [52.167756, 4.489948], [52.166832, 4.489776], [52.16596, 4.489707], [52.165463, 4.489632], [52.164897, 4.489503], [52.164515, 4.489514], [52.164509, 4.490747], [52.164542, 4.491563], [52.165009, 4.492486], [52.165068, 4.492732], [52.164772, 4.493676], [52.16491, 4.494288], [52.165535, 4.494942], [52.166443, 4.495962], [52.167299, 4.496992], [52.16772, 4.497356], [52.168023, 4.497474], [52.168227, 4.496477], [52.168865, 4.492561], [52.169059, 4.490764]]]];
+
+    // =========================================================================
+    // Map init
+    // =========================================================================
+    var map = L.map('map', { zoomControl: false }).setView([52.325, 4.761], 14);
+
+    var osmLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd'
+    }).addTo(map);
+
+    var aerialLayer = L.tileLayer(
+        'https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
+        { maxZoom: 19, attribution: '&copy; PDOK Luchtfoto' }
+    );
+
+    // Draw polygon boundary on map
+    var allPoints = [];
+    polygonCoords.forEach(function(rings) {
+        rings.forEach(function(ring) {
+            ring.forEach(function(p) { allPoints.push(p); });
+            L.polyline(ring.concat([ring[0]]), {
+                color: '#2266cc', weight: 2.5, opacity: 0.6,
+                dashArray: '8,6', fill: false
+            }).addTo(map);
+        });
+    });
+    if (allPoints.length > 0) {
+        map.fitBounds(L.latLngBounds(allPoints), { padding: [20, 20] });
+    }
+
+    // =========================================================================
+    // Container (asset) layers
+    // =========================================================================
+    var CONTAINER_COLORS = {
+        'Verkeersbord':        '#E53935',
+        'Paal':                '#FB8C00',
+        'Bewegwijzeringsbord': '#8E24AA',
+        'Obstakelbeveiliger':  '#1E88E5',
+        'Afvalbak':            '#43A047',
+        'Bank':                '#F4511E',
+        'Meubilair':           '#00ACC1',
+        'Mast':                '#6D4C41'
+    };
+
+    var containerLayers = {};
+    var containerCounts = {};
+    var containerVisible = {};
+    var markerIndex = []; // {marker, lat, lon, id} for visit detection
+    var visited = new Set();
+    var VISITED_COLOR = '#34C759';
+    var totalDistanceM = 0;
+
+    function saveVisited() {
+        try { localStorage.setItem('visited', JSON.stringify(Array.from(visited))); } catch(e) {}
+    }
+
+    function updateVisitCounter() {
+        var km = (totalDistanceM / 1000).toFixed(1);
+        document.getElementById('visit-counter').textContent = '\u2713 ' + visited.size + ' / ' + containers.length + '   |   ' + km + ' km';
+    }
+
+    containers.forEach(function(c) {
+        var t = c.type || 'onbekend';
+        if (!containerLayers[t]) {
+            containerLayers[t] = L.layerGroup().addTo(map);
+            containerCounts[t] = 0;
+            containerVisible[t] = true;
+        }
+        containerCounts[t]++;
+
+        var isVisited = visited.has(c.id);
+        var color = isVisited ? VISITED_COLOR : (CONTAINER_COLORS[t] || '#999');
+        var m = L.circleMarker([c.lat, c.lon], {
+            radius: 5, color: 'white', fillColor: color,
+            fillOpacity: 0.9, weight: 1.5
+        });
+
+        var html = '<div class="mob-popup"><div class="pop-title">' + t + '</div>';
+        if (c.extra) {
+            for (var k in c.extra) {
+                if (c.extra[k] !== null && c.extra[k] !== '') {
+                    html += '<div class="pop-row"><span class="pop-key">' + k + '</span><span class="pop-val">' + c.extra[k] + '</span></div>';
+                }
+            }
+        }
+        html += '<div class="pop-row"><span class="pop-key">lat/lon</span><span class="pop-val">' + c.lat.toFixed(5) + ', ' + c.lon.toFixed(5) + '</span></div>';
+        html += '</div>';
+        m.bindPopup(html);
+        containerLayers[t].addLayer(m);
+        markerIndex.push({marker: m, lat: c.lat, lon: c.lon, id: c.id});
+    });
+
+    updateVisitCounter();
+
+    // =========================================================================
+    // Bottom sheet: asset toggles
+    // =========================================================================
+    var sheetContent = document.getElementById('sheet-content');
+
+    Object.keys(containerLayers).forEach(function(type) {
+        var color = CONTAINER_COLORS[type] || '#999';
+        var count = containerCounts[type];
+
+        var row = document.createElement('div');
+        row.className = 'asset-row';
+        row.innerHTML =
+            '<div class="asset-dot" style="background:' + color + '"></div>' +
+            '<div class="asset-label">' + type + '</div>' +
+            '<div class="asset-count-badge">' + count + '</div>' +
+            '<div class="toggle on" data-type="' + type + '"></div>';
+
+        row.addEventListener('click', function() {
+            var toggle = row.querySelector('.toggle');
+            var t = toggle.dataset.type;
+            containerVisible[t] = !containerVisible[t];
+            toggle.classList.toggle('on', containerVisible[t]);
+            if (containerVisible[t]) {
+                containerLayers[t].addTo(map);
+            } else {
+                map.removeLayer(containerLayers[t]);
+            }
+        });
+
+        sheetContent.appendChild(row);
+    });
+
+    // =========================================================================
+    // Bottom sheet open/close
+    // =========================================================================
+    var sheet = document.getElementById('sheet');
+    var sheetOpen = false;
+
+    document.getElementById('sheet-handle').addEventListener('click', function() {
+        sheetOpen = !sheetOpen;
+        sheet.classList.toggle('open', sheetOpen);
+        document.body.classList.toggle('sheet-open', sheetOpen);
+    });
+
+    // =========================================================================
+    // GPS & Route tracking
+    // =========================================================================
+    var locationMarker = null;
+    var locationCircle = null;
+    var watchId = null;
+    var routePoints = [];
+    var routeLine = null;
+    var locating = false;
+    var wakeLock = null;
+
+    function saveRoute() {
+        try { localStorage.setItem('routePoints', JSON.stringify(routePoints)); } catch(e) {}
+    }
+
+    function calcTotalDistance() {
+        totalDistanceM = 0;
+        for (var i = 1; i < routePoints.length; i++) {
+            totalDistanceM += haversineM(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+        }
+    }
+
+    // Resume or start fresh
+    function resumeRit(doResume) {
+        document.getElementById('resume-toast').classList.remove('show');
+        if (doResume) {
+            try {
+                var saved = JSON.parse(localStorage.getItem('routePoints') || '[]');
+                routePoints = saved.map(function(p) {
+                    if (Array.isArray(p)) return {lat: p[0], lon: p[1], t: 0};
+                    return p;
+                });
+            } catch(e) {}
+            try { JSON.parse(localStorage.getItem('visited') || '[]').forEach(function(id) { visited.add(id); }); } catch(e) {}
+            // Re-color visited markers
+            markerIndex.forEach(function(mi) {
+                if (visited.has(mi.id)) mi.marker.setStyle({fillColor: VISITED_COLOR});
+            });
+            calcTotalDistance();
+            updateRouteLine();
+        } else {
+            routePoints = [];
+            visited.clear();
+            try { localStorage.removeItem('routePoints'); localStorage.removeItem('visited'); } catch(e) {}
+        }
+        updateVisitCounter();
+    }
+
+    // Check for saved rit on load
+    var hasSavedRit = false;
+    try {
+        var sr = JSON.parse(localStorage.getItem('routePoints') || '[]');
+        var sv = JSON.parse(localStorage.getItem('visited') || '[]');
+        hasSavedRit = sr.length > 0 || sv.length > 0;
+    } catch(e) {}
+    if (hasSavedRit) {
+        document.getElementById('resume-toast').classList.add('show');
+    }
+
+    function haversineM(lat1, lon1, lat2, lon2) {
+        var R = 6371000;
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function updateRouteLine() {
+        if (routePoints.length < 2) return;
+        var coords = routePoints.map(function(p) { return [p.lat, p.lon]; });
+        if (routeLine) {
+            routeLine.setLatLngs(coords);
+        } else {
+            routeLine = L.polyline(coords, {
+                color: '#FF3B30', weight: 4,
+                opacity: 0.85, lineJoin: 'round', lineCap: 'round'
+            }).addTo(map);
+        }
+    }
+
+    // Restore saved route on load
+    updateRouteLine();
+
+    document.getElementById('btn-locate').addEventListener('click', function() {
+        if (!navigator.geolocation) { alert('Geolocation niet beschikbaar.'); return; }
+        var btn = this;
+
+        if (locating) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+            locating = false;
+            btn.classList.remove('active', 'seeking');
+            document.getElementById('rec-dot').classList.remove('active');
+            if (locationMarker) { map.removeLayer(locationMarker); locationMarker = null; }
+            if (locationCircle) { map.removeLayer(locationCircle); locationCircle = null; }
+            // Release wake lock
+            if (wakeLock) { wakeLock.release().catch(function(){}); wakeLock = null; }
+            // Toast
+            var toast = document.getElementById('toast');
+            toast.textContent = 'GPS gestopt \u2014 ' + visited.size + ' van ' + containers.length + ' assets bezocht';
+            toast.classList.add('show');
+            setTimeout(function() { toast.classList.remove('show'); }, 4000);
+            return;
+        }
+
+        locating = true;
+        btn.classList.add('seeking');
+        var gpsStartTime = Date.now();
+
+        // Wake lock — keep screen on
+        if (navigator.wakeLock) {
+            navigator.wakeLock.request('screen').then(function(wl) { wakeLock = wl; }).catch(function(){});
+        }
+
+        watchId = navigator.geolocation.watchPosition(function(pos) {
+            var lat = pos.coords.latitude;
+            var lon = pos.coords.longitude;
+            var acc = pos.coords.accuracy;
+
+            // First fix: switch from seeking (orange) to active (green)
+            btn.classList.remove('seeking');
+            btn.classList.add('active');
+            document.getElementById('rec-dot').classList.add('active');
+
+            if (locationMarker) {
+                locationMarker.setLatLng([lat, lon]);
+                locationCircle.setLatLng([lat, lon]).setRadius(acc);
+            } else {
+                locationMarker = L.circleMarker([lat, lon], {
+                    radius: 10, color: '#fff', weight: 2.5,
+                    fillColor: '#007AFF', fillOpacity: 1,
+                    zIndexOffset: 1000
+                }).addTo(map);
+                locationCircle = L.circle([lat, lon], {
+                    radius: acc, color: '#007AFF',
+                    fillColor: '#007AFF', fillOpacity: 0.1, weight: 1
+                }).addTo(map);
+                map.setView([lat, lon], 17);
+            }
+
+            map.panTo([lat, lon]);
+
+            // Filter: alleen goede punten toevoegen aan route
+            var dominated = false;
+            if (Date.now() - gpsStartTime < 5000) dominated = true;
+            if (!dominated && acc > 25) dominated = true;
+            if (!dominated && routePoints.length > 0) {
+                var last = routePoints[routePoints.length - 1];
+                var dist = haversineM(last.lat, last.lon, lat, lon);
+                var dt = (pos.timestamp - last.t) / 1000;
+                if (dt > 0 && dist / dt > 11) dominated = true;
+                if (!dominated && dist < 3) dominated = true;
+            }
+            if (!dominated) {
+                var newPt = {lat: lat, lon: lon, t: pos.timestamp};
+                if (routePoints.length > 0) {
+                    var prev = routePoints[routePoints.length - 1];
+                    totalDistanceM += haversineM(prev.lat, prev.lon, lat, lon);
+                }
+                routePoints.push(newPt);
+                updateRouteLine();
+                updateVisitCounter();
+                saveRoute();
+            }
+
+            // Visit detection: check proximity to all assets
+            if (acc <= 25) {
+                var changed = false;
+                for (var i = 0; i < markerIndex.length; i++) {
+                    var mi = markerIndex[i];
+                    if (visited.has(mi.id)) continue;
+                    var d = haversineM(lat, lon, mi.lat, mi.lon);
+                    if (d <= 8) {
+                        visited.add(mi.id);
+                        mi.marker.setStyle({fillColor: VISITED_COLOR});
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    updateVisitCounter();
+                    saveVisited();
+                }
+            }
+
+        }, function(err) {
+            alert('Locatie fout: ' + err.message);
+            locating = false;
+            btn.classList.remove('active', 'seeking');
+        }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
+    });
+
+    // Clear route
+    document.getElementById('btn-clear-route').addEventListener('click', function() {
+        if (routePoints.length === 0 && visited.size === 0) return;
+        if (!confirm('Gereden route en bezochte assets wissen?')) return;
+        routePoints = [];
+        totalDistanceM = 0;
+        if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        // Reset visited markers
+        visited.clear();
+        markerIndex.forEach(function(mi) {
+            var t = containers.find(function(c) { return c.id === mi.id; });
+            var origColor = t ? (CONTAINER_COLORS[t.type] || '#999') : '#999';
+            mi.marker.setStyle({fillColor: origColor});
+        });
+        saveRoute();
+        saveVisited();
+        updateVisitCounter();
+    });
+
+    // Layer toggle
+    var showingAerial = false;
+    document.getElementById('btn-layers').addEventListener('click', function() {
+        if (showingAerial) {
+            map.removeLayer(aerialLayer);
+            osmLayer.addTo(map);
+        } else {
+            map.removeLayer(osmLayer);
+            aerialLayer.addTo(map);
+        }
+        showingAerial = !showingAerial;
+        // Toggle icon opacity to indicate active state
+        this.style.opacity = showingAerial ? '0.7' : '1';
+    });
+
+</script>
+</body>
+</html>
