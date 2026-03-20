@@ -136,16 +136,23 @@
         }
 
         /* Popup style */
-        #btn-clear-route {
+        .sheet-btn {
             display: inline-block;
-            margin: 0 20px 12px;
+            margin: 0 8px 12px 20px;
             padding: 6px 14px;
             font-size: 13px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        #btn-clear-route {
             color: #FF3B30;
             background: #FFF0F0;
             border: 1px solid #FFD4D4;
-            border-radius: 8px;
-            cursor: pointer;
+        }
+        #btn-export {
+            color: #007AFF;
+            background: #F0F4FF;
+            border: 1px solid #D4DFFF;
         }
 
         /* Visit counter */
@@ -249,7 +256,7 @@
 <body>
 
 <div id="map"></div>
-<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">5cab693</div>
+<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">71fd328</div>
 <div id="debug-panel"></div>
 <div id="debug-close" onclick="document.getElementById('debug-panel').classList.remove('show')">&times;</div>
 <div id="visit-counter"></div>
@@ -277,7 +284,8 @@
         Assets
         <span id="asset-count">152 punten</span>
     </div>
-    <button id="btn-clear-route">Wis gereden route</button>
+    <button class="sheet-btn" id="btn-export">Deel resultaten</button>
+    <button class="sheet-btn" id="btn-clear-route">Wis gereden route</button>
     <div id="sheet-content"></div>
 </div>
 
@@ -823,6 +831,35 @@
         saveRoute();
         saveVisited();
         updateVisitCounter();
+    });
+
+    // Export results
+    document.getElementById('btn-export').addEventListener('click', function() {
+        var csv = 'id,type,subtype,lat,lon,bezocht\n';
+        containers.forEach(function(c) {
+            var sub = c.extra && c.extra.subtype ? c.extra.subtype : c.type;
+            var bez = visited.has(c.id) ? 'ja' : 'nee';
+            csv += c.id + ',' + c.type + ',' + sub + ',' + c.lat + ',' + c.lon + ',' + bez + '\n';
+        });
+
+        var blob = new Blob([csv], {type: 'text/csv'});
+        var fileName = 'inspectie_' + new Date().toISOString().slice(0,10) + '.csv';
+        var file = new File([blob], fileName, {type: 'text/csv'});
+
+        // Try Web Share API (native share menu)
+        if (navigator.canShare && navigator.canShare({files: [file]})) {
+            navigator.share({
+                title: 'Inspectie resultaten',
+                text: visited.size + ' van ' + containers.length + ' assets bezocht',
+                files: [file]
+            }).catch(function(){});
+        } else {
+            // Fallback: download
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = fileName;
+            a.click();
+        }
     });
 
     // Layer toggle
