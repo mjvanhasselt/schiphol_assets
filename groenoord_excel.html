@@ -92,12 +92,11 @@
         }
         .asset-row:last-child { border-bottom: none; }
         .asset-dot {
-            width: 12px; height: 12px;
-            border-radius: 50%;
+            width: 16px; height: 16px;
             margin-right: 12px;
             flex-shrink: 0;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
+        .asset-dot svg { display: block; }
         .asset-label {
             flex: 1;
             font-size: 16px;
@@ -269,7 +268,7 @@
 
 <div id="map"></div>
 <div id="rec-dot"></div>
-<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">f939722</div>
+<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">7106c3d</div>
 <div id="debug-panel"></div>
 <div id="debug-close" onclick="document.getElementById('debug-panel').classList.remove('show')">&times;</div>
 <div id="visit-counter"></div>
@@ -439,6 +438,24 @@
 
     updateVisitCounter();
 
+    function shapeIcon(shape, color) {
+        var s = '<svg width="16" height="16" viewBox="0 0 16 16">';
+        if (shape === 'triangle') {
+            s += '<polygon points="8,2 14,13 2,13" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'invtriangle') {
+            s += '<polygon points="8,14 14,3 2,3" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'square') {
+            s += '<rect x="2.5" y="2.5" width="11" height="11" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'diamond') {
+            s += '<polygon points="8,1 14,8 8,15 2,8" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'star') {
+            s += '<polygon points="8,1 9.8,6 15,6.5 11,10.5 12.5,15 8,12 3.5,15 5,10.5 1,6.5 6.2,6" fill="' + color + '" stroke="white" stroke-width="0.8"/>';
+        } else {
+            s += '<circle cx="8" cy="8" r="6" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        }
+        return s + '</svg>';
+    }
+
     // =========================================================================
     // Bottom sheet: asset toggles
     // =========================================================================
@@ -451,7 +468,7 @@
         var row = document.createElement('div');
         row.className = 'asset-row';
         row.innerHTML =
-            '<div class="asset-dot" style="background:' + color + '"></div>' +
+            '<div class="asset-dot">' + shapeIcon(CONTAINER_SHAPES[type] || 'circle', color) + '</div>' +
             '<div class="asset-label">' + type + '</div>' +
             '<div class="asset-count-badge">' + count + '</div>' +
             '<div class="toggle on" data-type="' + type + '"></div>';
