@@ -269,7 +269,7 @@
 
 <div id="map"></div>
 <div id="rec-dot"></div>
-<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">45c0e27</div>
+<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">9808f25</div>
 <div id="debug-panel"></div>
 <div id="debug-close" onclick="document.getElementById('debug-panel').classList.remove('show')">&times;</div>
 <div id="visit-counter"></div>
@@ -309,7 +309,7 @@
     // =========================================================================
     // Map init
     // =========================================================================
-    var map = L.map('map', { zoomControl: false }).setView([52.325, 4.761], 14);
+    var map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([52.325, 4.761], 14);
 
     var osmLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         maxZoom: 19,
@@ -340,7 +340,53 @@
     // =========================================================================
     // Container (asset) layers
     // =========================================================================
-    var CONTAINER_COLORS = {"Verkeersbord": "#E53935", "Verlichting": "#FB8C00", "Paal": "#FF9800", "Afvalbak": "#43A047", "Meubilair": "#00ACC1"};
+    var CONTAINER_COLORS = {"Verkeersbord": "#555", "Verlichting": "#555", "Paal": "#555", "Afvalbak": "#555", "Meubilair": "#555"};
+    var CONTAINER_SHAPES = {"Verkeersbord": "triangle", "Verlichting": "diamond", "Paal": "square", "Afvalbak": "invtriangle", "Meubilair": "star"};
+    var DEFAULT_COLOR = '#555';
+
+    // =========================================================================
+    // Custom shape markers (canvas-based, same performance as circleMarker)
+    // =========================================================================
+    L.ShapeMarker = L.CircleMarker.extend({
+        options: { shape: 'circle' },
+        _updatePath: function() {
+            var p = this._point;
+            var r = this._radius;
+            var ctx = this._renderer._ctx;
+            var shape = this.options.shape;
+
+            ctx.beginPath();
+            if (shape === 'triangle') {
+                ctx.moveTo(p.x, p.y - r);
+                ctx.lineTo(p.x + r, p.y + r * 0.7);
+                ctx.lineTo(p.x - r, p.y + r * 0.7);
+            } else if (shape === 'invtriangle') {
+                ctx.moveTo(p.x, p.y + r);
+                ctx.lineTo(p.x + r, p.y - r * 0.7);
+                ctx.lineTo(p.x - r, p.y - r * 0.7);
+            } else if (shape === 'square') {
+                var s = r * 0.8;
+                ctx.rect(p.x - s, p.y - s, s * 2, s * 2);
+            } else if (shape === 'diamond') {
+                ctx.moveTo(p.x, p.y - r);
+                ctx.lineTo(p.x + r * 0.7, p.y);
+                ctx.lineTo(p.x, p.y + r);
+                ctx.lineTo(p.x - r * 0.7, p.y);
+            } else if (shape === 'star') {
+                for (var i = 0; i < 5; i++) {
+                    var a1 = (i * 72 - 90) * Math.PI / 180;
+                    var a2 = ((i * 72) + 36 - 90) * Math.PI / 180;
+                    ctx.lineTo(p.x + Math.cos(a1) * r, p.y + Math.sin(a1) * r);
+                    ctx.lineTo(p.x + Math.cos(a2) * r * 0.45, p.y + Math.sin(a2) * r * 0.45);
+                }
+            } else {
+                // Default: circle
+                ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            }
+            ctx.closePath();
+            this._fillStroke(ctx, this);
+        }
+    });
 
     var containerLayers = {};
     var containerCounts = {};
@@ -369,10 +415,11 @@
         containerCounts[t]++;
 
         var isVisited = visited.has(c.id);
-        var color = isVisited ? VISITED_COLOR : (CONTAINER_COLORS[t] || '#999');
-        var m = L.circleMarker([c.lat, c.lon], {
-            radius: 5, color: 'white', fillColor: color,
-            fillOpacity: 0.9, weight: 1.5
+        var color = isVisited ? VISITED_COLOR : DEFAULT_COLOR;
+        var shape = CONTAINER_SHAPES[t] || 'circle';
+        var m = new L.ShapeMarker([c.lat, c.lon], {
+            radius: 6, color: 'white', fillColor: color,
+            fillOpacity: 0.9, weight: 1.5, shape: shape
         });
 
         var html = '<div class="mob-popup"><div class="pop-title">' + t + '</div>';
@@ -398,7 +445,7 @@
     var sheetContent = document.getElementById('sheet-content');
 
     Object.keys(containerLayers).forEach(function(type) {
-        var color = CONTAINER_COLORS[type] || '#999';
+        var color = CONTAINER_COLORS[type] || DEFAULT_COLOR;
         var count = containerCounts[type];
 
         var row = document.createElement('div');
@@ -715,9 +762,7 @@
         // Reset visited markers
         visited.clear();
         markerIndex.forEach(function(mi) {
-            var t = containers.find(function(c) { return c.id === mi.id; });
-            var origColor = t ? (CONTAINER_COLORS[t.type] || '#999') : '#999';
-            mi.marker.setStyle({fillColor: origColor});
+            mi.marker.setStyle({fillColor: DEFAULT_COLOR});
         });
         saveRoute();
         saveVisited();
