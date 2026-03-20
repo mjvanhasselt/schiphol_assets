@@ -269,7 +269,7 @@
 
 <div id="map"></div>
 <div id="rec-dot"></div>
-<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(0,0,0,0.25);cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">5365f37</div>
+<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">9605b97</div>
 <div id="debug-panel"></div>
 <div id="debug-close" onclick="document.getElementById('debug-panel').classList.remove('show')">&times;</div>
 <div id="visit-counter"></div>
@@ -495,6 +495,17 @@
                 if (visited.has(mi.id)) mi.marker.setStyle({fillColor: VISITED_COLOR});
             });
             calcTotalDistance();
+            // Restore route arrows
+            routeArrows.clearLayers();
+            arrowDistAcc = 0;
+            for (var i = 1; i < routePoints.length; i++) {
+                var segD = haversineM(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+                arrowDistAcc += segD;
+                if (arrowDistAcc >= 30) {
+                    addRouteArrow(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+                    arrowDistAcc = 0;
+                }
+            }
             updateRouteLine();
         } else {
             routePoints = [];
@@ -536,6 +547,22 @@
                 Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
                 Math.sin(dLon/2) * Math.sin(dLon/2);
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    var routeArrows = L.layerGroup().addTo(map);
+    var arrowDistAcc = 0; // accumulated distance since last arrow
+
+    function addRouteArrow(lat1, lon1, lat2, lon2) {
+        var angle = Math.atan2(lat2 - lat1, lon2 - lon1) * 180 / Math.PI;
+        var midLat = (lat1 + lat2) / 2;
+        var midLon = (lon1 + lon2) / 2;
+        var icon = L.divIcon({
+            className: '',
+            html: '<svg width="14" height="14" viewBox="0 0 14 14" style="transform:rotate(' + (90 - angle) + 'deg)"><path d="M7 1L12 10L7 8L2 10Z" fill="#FF3B30" opacity="0.7"/></svg>',
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
+        });
+        routeArrows.addLayer(L.marker([midLat, midLon], {icon: icon, interactive: false}));
     }
 
     function updateRouteLine() {
@@ -633,7 +660,13 @@
                 var newPt = {lat: lat, lon: lon, t: pos.timestamp};
                 if (routePoints.length > 0) {
                     var prev = routePoints[routePoints.length - 1];
-                    totalDistanceM += haversineM(prev.lat, prev.lon, lat, lon);
+                    var segDist = haversineM(prev.lat, prev.lon, lat, lon);
+                    totalDistanceM += segDist;
+                    arrowDistAcc += segDist;
+                    if (arrowDistAcc >= 30) {
+                        addRouteArrow(prev.lat, prev.lon, lat, lon);
+                        arrowDistAcc = 0;
+                    }
                 }
                 routePoints.push(newPt);
                 updateRouteLine();
@@ -685,7 +718,9 @@
         if (!confirm('Gereden route en bezochte assets wissen?')) return;
         routePoints = [];
         totalDistanceM = 0;
+        arrowDistAcc = 0;
         if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        routeArrows.clearLayers();
         // Reset visited markers
         visited.clear();
         markerIndex.forEach(function(mi) {
