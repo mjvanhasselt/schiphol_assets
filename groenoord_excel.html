@@ -269,7 +269,7 @@
 
 <div id="map"></div>
 <div id="rec-dot"></div>
-<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">9605b97</div>
+<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">3f3c1b8</div>
 <div id="debug-panel"></div>
 <div id="debug-close" onclick="document.getElementById('debug-panel').classList.remove('show')">&times;</div>
 <div id="visit-counter"></div>
@@ -501,7 +501,7 @@
             for (var i = 1; i < routePoints.length; i++) {
                 var segD = haversineM(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
                 arrowDistAcc += segD;
-                if (arrowDistAcc >= 30) {
+                if (arrowDistAcc >= 20) {
                     addRouteArrow(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
                     arrowDistAcc = 0;
                 }
@@ -558,9 +558,9 @@
         var midLon = (lon1 + lon2) / 2;
         var icon = L.divIcon({
             className: '',
-            html: '<svg width="14" height="14" viewBox="0 0 14 14" style="transform:rotate(' + (90 - angle) + 'deg)"><path d="M7 1L12 10L7 8L2 10Z" fill="#FF3B30" opacity="0.7"/></svg>',
-            iconSize: [14, 14],
-            iconAnchor: [7, 7]
+            html: '<svg width="20" height="20" viewBox="0 0 20 20" style="transform:rotate(' + (90 - angle) + 'deg)"><path d="M10 2L17 14L10 11L3 14Z" fill="#CC2020" stroke="white" stroke-width="1.5"/></svg>',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
         });
         routeArrows.addLayer(L.marker([midLat, midLon], {icon: icon, interactive: false}));
     }
@@ -663,7 +663,7 @@
                     var segDist = haversineM(prev.lat, prev.lon, lat, lon);
                     totalDistanceM += segDist;
                     arrowDistAcc += segDist;
-                    if (arrowDistAcc >= 30) {
+                    if (arrowDistAcc >= 20) {
                         addRouteArrow(prev.lat, prev.lon, lat, lon);
                         arrowDistAcc = 0;
                     }
