@@ -268,7 +268,7 @@
 
 <div id="map"></div>
 <div id="rec-dot"></div>
-<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">7106c3d</div>
+<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">2bf6ef1</div>
 <div id="debug-panel"></div>
 <div id="debug-close" onclick="document.getElementById('debug-panel').classList.remove('show')">&times;</div>
 <div id="visit-counter"></div>
@@ -461,32 +461,49 @@
     // =========================================================================
     var sheetContent = document.getElementById('sheet-content');
 
+    // Split types into shaped (configured) and overig (circle/default)
+    var shapedTypes = [];
+    var overigTypes = [];
+    var overigCount = 0;
     Object.keys(containerLayers).forEach(function(type) {
-        var color = CONTAINER_COLORS[type] || DEFAULT_COLOR;
-        var count = containerCounts[type];
+        if (CONTAINER_SHAPES[type] && CONTAINER_SHAPES[type] !== 'circle') {
+            shapedTypes.push(type);
+        } else {
+            overigTypes.push(type);
+            overigCount += containerCounts[type];
+        }
+    });
 
+    function addSheetRow(label, shape, color, types) {
+        var count = 0;
+        types.forEach(function(t) { count += containerCounts[t] || 0; });
         var row = document.createElement('div');
         row.className = 'asset-row';
         row.innerHTML =
-            '<div class="asset-dot">' + shapeIcon(CONTAINER_SHAPES[type] || 'circle', color) + '</div>' +
-            '<div class="asset-label">' + type + '</div>' +
+            '<div class="asset-dot">' + shapeIcon(shape, color) + '</div>' +
+            '<div class="asset-label">' + label + '</div>' +
             '<div class="asset-count-badge">' + count + '</div>' +
-            '<div class="toggle on" data-type="' + type + '"></div>';
+            '<div class="toggle on"></div>';
 
+        var visible = true;
         row.addEventListener('click', function() {
-            var toggle = row.querySelector('.toggle');
-            var t = toggle.dataset.type;
-            containerVisible[t] = !containerVisible[t];
-            toggle.classList.toggle('on', containerVisible[t]);
-            if (containerVisible[t]) {
-                containerLayers[t].addTo(map);
-            } else {
-                map.removeLayer(containerLayers[t]);
-            }
+            visible = !visible;
+            row.querySelector('.toggle').classList.toggle('on', visible);
+            types.forEach(function(t) {
+                containerVisible[t] = visible;
+                if (visible) { containerLayers[t].addTo(map); }
+                else { map.removeLayer(containerLayers[t]); }
+            });
         });
-
         sheetContent.appendChild(row);
+    }
+
+    shapedTypes.forEach(function(type) {
+        addSheetRow(type, CONTAINER_SHAPES[type], CONTAINER_COLORS[type] || DEFAULT_COLOR, [type]);
     });
+    if (overigTypes.length > 0) {
+        addSheetRow('Overig', 'circle', DEFAULT_COLOR, overigTypes);
+    }
 
     // =========================================================================
     // Bottom sheet open/close
