@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Zandvoort Kurt</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+        #map { position: absolute; inset: 0; z-index: 1; }
+
+        /* Floating action buttons */
+        #fab-group {
+            position: absolute;
+            bottom: 120px;
+            right: 16px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transition: bottom 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        body.sheet-open #fab-group { bottom: calc(55vh + 100px); }
+        .fab {
+            width: 52px; height: 52px;
+            border-radius: 50%;
+            border: none;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+            font-size: 22px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .fab:active { transform: scale(0.93); }
+        #btn-locate { background: white; color: #333; }
+        #btn-locate.seeking { background: #FF9500; color: white; }
+        #btn-locate.active { background: #34C759; color: white; }
+        #btn-clear { background: white; color: #FF3B30; }
+        #btn-layers { background: white; color: #333; }
+
+        /* Bottom sheet */
+        #sheet {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            z-index: 999;
+            background: white;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+            transform: translateY(calc(100% - 72px));
+            transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        #sheet.open { transform: translateY(0); }
+
+        #sheet-handle {
+            display: flex; align-items: center; justify-content: center;
+            padding: 12px 0 8px;
+            cursor: pointer;
+        }
+        #sheet-handle::before {
+            content: '';
+            width: 36px; height: 4px;
+            background: #ddd;
+            border-radius: 2px;
+        }
+
+        #sheet-title {
+            padding: 0 20px 12px;
+            font-size: 17px; font-weight: 700; color: #111;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        #asset-count {
+            font-size: 13px; font-weight: 400; color: #888;
+        }
+
+        #sheet-content {
+            padding: 0 16px 32px;
+            overflow-y: auto;
+            max-height: 55vh;
+        }
+
+        /* Asset toggle rows */
+        .asset-row {
+            display: flex;
+            align-items: center;
+            padding: 13px 4px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .asset-row:last-child { border-bottom: none; }
+        .asset-dot {
+            width: 16px; height: 16px;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        .asset-dot svg { display: block; }
+        .asset-label {
+            flex: 1;
+            font-size: 16px;
+            color: #111;
+        }
+        .asset-count-badge {
+            font-size: 13px;
+            color: #999;
+            margin-right: 12px;
+        }
+        .toggle {
+            width: 48px; height: 28px;
+            border-radius: 14px;
+            background: #E5E5EA;
+            position: relative;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        .toggle.on { background: #34C759; }
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            background: white;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+            transition: left 0.2s;
+        }
+        .toggle.on::after { left: 22px; }
+
+        /* Leaflet overrides for mobile */
+        .leaflet-control-zoom { display: none; }
+        .leaflet-control-layers {
+            border-radius: 12px !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2) !important;
+        }
+
+        /* Popup style */
+        #btn-clear-route {
+            display: inline-block;
+            margin: 0 20px 12px;
+            padding: 6px 14px;
+            font-size: 13px;
+            color: #FF3B30;
+            background: #FFF0F0;
+            border: 1px solid #FFD4D4;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        /* Visit counter */
+        #visit-counter {
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 15px;
+            font-weight: 600;
+            pointer-events: none;
+        }
+
+        /* Toast */
+        #toast {
+            position: absolute;
+            bottom: 140px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1100;
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        #toast.show { opacity: 1; }
+
+        /* Resume toast */
+        #resume-toast {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1200;
+            background: white;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            text-align: center;
+            display: none;
+        }
+        #resume-toast.show { display: block; }
+        #resume-toast p { font-size: 15px; color: #333; margin-bottom: 16px; }
+        #resume-toast button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 0 6px;
+        }
+        #resume-toast .btn-continue { background: #34C759; color: white; }
+        #resume-toast .btn-new { background: #E5E5EA; color: #333; }
+
+
+        /* Debug log */
+        #debug-panel {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 2000;
+            background: rgba(0,0,0,0.9);
+            color: #0f0;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 40px 10px 10px;
+            overflow-y: auto;
+            display: none;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        #debug-panel.show { display: block; }
+        #debug-close {
+            position: fixed;
+            top: 8px; right: 12px;
+            z-index: 2001;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            display: none;
+        }
+        #debug-panel.show ~ #debug-close { display: block; }
+
+        .mob-popup { font-size: 14px; line-height: 1.6; min-width: 200px; }
+        .mob-popup .pop-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+        .mob-popup .pop-row { display: flex; justify-content: space-between; gap: 8px; }
+        .mob-popup .pop-key { color: #888; font-size: 12px; }
+        .mob-popup .pop-val { font-size: 13px; text-align: right; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">5cab693</div>
+<div id="debug-panel"></div>
+<div id="debug-close" onclick="document.getElementById('debug-panel').classList.remove('show')">&times;</div>
+<div id="visit-counter"></div>
+<div id="toast"></div>
+<div id="resume-toast">
+    <p>Vorige rit gevonden.<br>Doorgaan of nieuwe rit?</p>
+    <button class="btn-continue" onclick="resumeRit(true)">Doorgaan</button>
+    <button class="btn-new" onclick="resumeRit(false)">Nieuwe rit</button>
+</div>
+
+<!-- Floating buttons -->
+<div id="fab-group">
+    <button class="fab" id="btn-layers" title="Kaartlaag">
+        <svg id="icon-layers" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+    </button>
+    <button class="fab" id="btn-locate" title="Mijn locatie">
+        <svg id="icon-locate" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+    </button>
+</div>
+
+<!-- Bottom sheet -->
+<div id="sheet">
+    <div id="sheet-handle"></div>
+    <div id="sheet-title">
+        Assets
+        <span id="asset-count">152 punten</span>
+    </div>
+    <button id="btn-clear-route">Wis gereden route</button>
+    <div id="sheet-content"></div>
+</div>
+
+<script>
+
+    var containers = [{"id": "G0473.062d2978ad014a829b1067135c8975c4", "type": "Verlichting", "lat": 52.3711109, "lon": 4.5261095, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.09f589b2f6174682897404c56b3b714a", "type": "Verlichting", "lat": 52.3707355, "lon": 4.5270574, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.1697b3fafca04f6db1fda388b0374139", "type": "Verlichting", "lat": 52.3683593, "lon": 4.5241024, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.23f08705f7444a649843db6551c2e30a", "type": "Verlichting", "lat": 52.3710996, "lon": 4.5263099, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.39e8bf003bec4caead95608ee65bb97b", "type": "Verlichting", "lat": 52.3707275, "lon": 4.527968, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.4a7803d26dee412dbdac74498e93a6b3", "type": "Verlichting", "lat": 52.3689713, "lon": 4.5232579, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.59f01c63bfce489bbb5c49ec0408133a", "type": "Verlichting", "lat": 52.3687387, "lon": 4.5231028, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.792edf9cfc9e4cdfa99da7071357f5f6", "type": "Verlichting", "lat": 52.3686707, "lon": 4.5244266, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.81421bd0981d4065b9fb449a0045e421", "type": "Verlichting", "lat": 52.370667, "lon": 4.5274487, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.8af5440afe7d44159d36c7fdb312f413", "type": "Verlichting", "lat": 52.368463, "lon": 4.5242836, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.936f852b32e145878857346d03948c04", "type": "Verlichting", "lat": 52.3709212, "lon": 4.5263125, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.b19b705164e24b5bab9204a499643eb2", "type": "Verlichting", "lat": 52.3692019, "lon": 4.5234234, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.c3ccaeecb5ba449fbeb5e9608d5b9b60", "type": "Verlichting", "lat": 52.3709449, "lon": 4.5266583, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.c4fad15960ee41139766dbaed216b080", "type": "Verlichting", "lat": 52.3688004, "lon": 4.5245654, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.fe5327a6561041fe912c5381c8570f4c", "type": "Verlichting", "lat": 52.3686979, "lon": 4.5232574, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.33e2e1dffed041ec8fb2024faabbcad2", "type": "Verlichting", "lat": 52.3712084, "lon": 4.5253119, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.a3a204d26d414fd6a29de3050fdf4094", "type": "Verlichting", "lat": 52.3714722, "lon": 4.5254878, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.e5e026e2f233465a8a4e0188f8c83e2f", "type": "Verlichting", "lat": 52.3714926, "lon": 4.5257813, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.0c27322769854dd09098c42384182d84", "type": "Verlichting", "lat": 52.3694296, "lon": 4.5243301, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.13ec99c99a744d009a0a3ec2ccef0f5f", "type": "Verlichting", "lat": 52.36833, "lon": 4.5233416, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.148476ec9e284bfdb6b79198a073805f", "type": "Verlichting", "lat": 52.3704621, "lon": 4.5248585, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.18a8f5f782ff40b48ea34c2a8df19d47", "type": "Verlichting", "lat": 52.368853, "lon": 4.5256112, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.1a2c0a1804de48a296c3b3cdf5916357", "type": "Verlichting", "lat": 52.3702365, "lon": 4.5252384, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.1d7ee4b80f9a4736aa03ad203f7fa66a", "type": "Verlichting", "lat": 52.3690228, "lon": 4.5237888, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.25aaba9e012447108fa9f952e1f910b3", "type": "Verlichting", "lat": 52.3679926, "lon": 4.5235807, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.28e40539504f488b90cdc86233e26222", "type": "Verlichting", "lat": 52.3697327, "lon": 4.5265437, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.2b1762daab4343629c98aba4d71089fe", "type": "Verlichting", "lat": 52.3703829, "lon": 4.52637, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.328a96b0146c4177a60a16b2c9d069ad", "type": "Verlichting", "lat": 52.3676885, "lon": 4.523639, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.347fe4fffbab40369005e2792fab3f3c", "type": "Verlichting", "lat": 52.3702741, "lon": 4.5266721, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.374548d967af4967973ba583bfa36bd1", "type": "Verlichting", "lat": 52.3688514, "lon": 4.5236758, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.376a12fb6ad34ccc8a224ed218c34945", "type": "Verlichting", "lat": 52.3688601, "lon": 4.5258049, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.37d52042d49a4910a3201c7911f5ab8e", "type": "Verlichting", "lat": 52.3705259, "lon": 4.5255357, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.3a74aeae342c41d2a0236799b53c7e9e", "type": "Verlichting", "lat": 52.3680176, "lon": 4.5238843, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.3c0a95a33b1844159304364f7a730927", "type": "Verlichting", "lat": 52.3702246, "lon": 4.526276, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.411d978de4ce406090fd49750808c547", "type": "Verlichting", "lat": 52.3697845, "lon": 4.5252435, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.419412a70182496e97f17321170e6741", "type": "Verlichting", "lat": 52.3679916, "lon": 4.5235764, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.452b7dbaf6ed4215a137153f75c8b2f1", "type": "Verlichting", "lat": 52.3700455, "lon": 4.5249514, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.46385ed293ae42edbbb939fbbc310dab", "type": "Verlichting", "lat": 52.3701327, "lon": 4.5243861, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.46e12d4be2924273a9e1f23ff32b150a", "type": "Verlichting", "lat": 52.3698777, "lon": 4.5243702, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.48469076bd67400e9b451e81c460317c", "type": "Verlichting", "lat": 52.3684917, "lon": 4.5249263, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.50985ecf8e75444281517c5b9c9283f9", "type": "Verlichting", "lat": 52.369967, "lon": 4.5260818, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.540210fb5d304d33b8e985f4821b4b6d", "type": "Verlichting", "lat": 52.3686207, "lon": 4.5253503, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.545d1b0a291440d29a74ff6ec9295161", "type": "Verlichting", "lat": 52.3691883, "lon": 4.5238982, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.54bed78c3aa145199dfb7925f5f15d60", "type": "Verlichting", "lat": 52.3686273, "lon": 4.5235326, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.55d00d83ae7d4964937688f37b1f8894", "type": "Verlichting", "lat": 52.368064, "lon": 4.5242945, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.5637cfd08fba4e59a3907b5f68db4cfc", "type": "Verlichting", "lat": 52.3693288, "lon": 4.5254168, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.5738e7080216403ba7c028a9de82e84a", "type": "Verlichting", "lat": 52.3696142, "lon": 4.5251685, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.57a7c489ff4c4d4bbf77980ba30836f1", "type": "Verlichting", "lat": 52.3677448, "lon": 4.5229564, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.5b02042ed49c427ebe1713b366b15f18", "type": "Verlichting", "lat": 52.3691864, "lon": 4.5252962, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.5e656c84dc204b5ba35ad037f47a7add", "type": "Verlichting", "lat": 52.3694286, "lon": 4.5238716, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.5ece033d5aee49b49bfddaff8b5a2c39", "type": "Verlichting", "lat": 52.3694547, "lon": 4.5250823, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.5f37eea9b3a3454f9bc83eb7600ce493", "type": "Verlichting", "lat": 52.3699443, "lon": 4.5269716, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.65bc0d5b8df84ff28a76ff191b5e07aa", "type": "Verlichting", "lat": 52.3701242, "lon": 4.5258915, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.66ff13db83e94d9bb7601ab3c2f9a14d", "type": "Verlichting", "lat": 52.3704458, "lon": 4.5259029, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.707203544eeb448abb1ebcdf1f567011", "type": "Verlichting", "lat": 52.3684761, "lon": 4.5232538, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.77885c1edf5f4d15a87ce6a7a63dc5af", "type": "Verlichting", "lat": 52.3706051, "lon": 4.5260883, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.782462ef850948d19fd96223f534bb86", "type": "Verlichting", "lat": 52.369283, "lon": 4.5252026, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.7a6c470370d84b7e860e918483a8851b", "type": "Verlichting", "lat": 52.3682356, "lon": 4.5246195, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.7d774db005ec4664b180fdddc31b1f82", "type": "Verlichting", "lat": 52.3675449, "lon": 4.5234807, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.825403258b664fce90bec9dbbc9b975c", "type": "Verlichting", "lat": 52.3701462, "lon": 4.52604, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.84e26a565c744ec8b207b0003573c3e9", "type": "Verlichting", "lat": 52.3694403, "lon": 4.5256465, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.8859bad39c9d47ac8716ede344f4937a", "type": "Verlichting", "lat": 52.3681519, "lon": 4.5230489, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.9157903838344d288893312109188139", "type": "Verlichting", "lat": 52.3691177, "lon": 4.5249296, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.92417d1679cb4c458197981d2ff2b953", "type": "Verlichting", "lat": 52.369555, "lon": 4.5241427, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.9f23a9f95adb4121922c6169463ff75a", "type": "Verlichting", "lat": 52.3702913, "lon": 4.5247148, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.9f2cbf0ca5424bfe901739fa42f66797", "type": "Verlichting", "lat": 52.3694193, "lon": 4.5246604, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.a65f5f2165ac46808203b25f3d5fafde", "type": "Verlichting", "lat": 52.3692899, "lon": 4.5248903, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.a8be7c4c2b454488b76f92db4846a661", "type": "Verlichting", "lat": 52.3679453, "lon": 4.5230925, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.b05efe30f98e4efdaf4700e3383a4c00", "type": "Verlichting", "lat": 52.3703537, "lon": 4.5246206, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.b60b7938277447278964668144150800", "type": "Verlichting", "lat": 52.3678922, "lon": 4.5239872, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.b72f63b227214db29fa5fbbf3cbad980", "type": "Verlichting", "lat": 52.3697893, "lon": 4.5241239, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.be03ec6165114867b36ec6884332610c", "type": "Verlichting", "lat": 52.3697458, "lon": 4.526855, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.c626b57f748d428784f752a310137f9e", "type": "Verlichting", "lat": 52.369956, "lon": 4.5258096, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.c92ca268fd514622b0addaadab6569f7", "type": "Verlichting", "lat": 52.3700367, "lon": 4.5246803, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.cb349a73a27c452fae3a871180c387cb", "type": "Verlichting", "lat": 52.3695676, "lon": 4.5259522, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.d0e6b686d26b4661ba1b8a0283332468", "type": "Verlichting", "lat": 52.3689426, "lon": 4.5247253, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.d9df026a9156452aa98653cabef31b34", "type": "Verlichting", "lat": 52.3701466, "lon": 4.5269441, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.e4f34af32bd34c76b64dbb7b22cd3585", "type": "Verlichting", "lat": 52.3696609, "lon": 4.5262358, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.f0740f20cccb4c0c90453466f315895a", "type": "Verlichting", "lat": 52.3700059, "lon": 4.5253067, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.f7734ed38faa4b78b69318bc00c1fdb1", "type": "Verlichting", "lat": 52.3679391, "lon": 4.5233491, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.fb9718c0c7cc4adba6d08d531058a947", "type": "Verlichting", "lat": 52.3691193, "lon": 4.5255175, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.4ca52c4e50124fa58e622629ffd2b2b7", "type": "Verlichting", "lat": 52.3706462, "lon": 4.5243153, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.513829192ed9406b985607563a735b10", "type": "Verlichting", "lat": 52.3712128, "lon": 4.5269851, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.60b13285e8134c2dbaad6a8bad2a4b5b", "type": "Verlichting", "lat": 52.370471, "lon": 4.5240844, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.6440656016ad4674b28f4c2ea5604d62", "type": "Verlichting", "lat": 52.3710041, "lon": 4.5275684, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.8b8fce90385e470badb45520f12fd983", "type": "Verlichting", "lat": 52.3708685, "lon": 4.5245793, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.a8a3527a179d47219ac9986249f2f1d7", "type": "Verlichting", "lat": 52.3707628, "lon": 4.5243854, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.aaec6dd5be7541f692f8c21a97a8a474", "type": "Verlichting", "lat": 52.3709764, "lon": 4.527097, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.b25cc854c2044accacbdfbe1c0f0c808", "type": "Verlichting", "lat": 52.3712012, "lon": 4.5265943, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.cbd683121b1241879b7b045bc7e43e8c", "type": "Verlichting", "lat": 52.3715286, "lon": 4.5251116, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.d65413c371a044fea331635b66687653", "type": "Verlichting", "lat": 52.3713, "lon": 4.5249568, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.ede363804c7544ceaf1cadc054aa6b8a", "type": "Verlichting", "lat": 52.3711105, "lon": 4.5248023, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.f600f1cd35844eb5a99f2fb6e21f25cc", "type": "Verlichting", "lat": 52.3702732, "lon": 4.5240146, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.f9b9d090adeb47248610c590b92b6646", "type": "Verlichting", "lat": 52.3712573, "lon": 4.5259701, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.0d875e3243884e3b9776be076c3cc02c", "type": "Verlichting", "lat": 52.3704223, "lon": 4.52777, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.10283725df024b1c9909ed3df6aa518e", "type": "Verlichting", "lat": 52.367463, "lon": 4.5232848, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.40a4ad076c8f4c0a95d1e5e2c5d9f7a2", "type": "Verlichting", "lat": 52.3694745, "lon": 4.5275621, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.42e8ebfaae28471f90ed98a6dd293724", "type": "Verlichting", "lat": 52.3707637, "lon": 4.5249318, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.444e5f9223984dea81e38227cb401738", "type": "Verlichting", "lat": 52.3701239, "lon": 4.5258919, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.4bafa6fc935c43cfa7c03b8c897971e2", "type": "Verlichting", "lat": 52.3702293, "lon": 4.527701, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.4d5f8a61137b49b48b163e6c04b3a065", "type": "Verlichting", "lat": 52.3694115, "lon": 4.5271577, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.677dc083efc646fab0e26f5d8f218d87", "type": "Verlichting", "lat": 52.3698339, "lon": 4.5275649, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.6e71c699f4264b6fbd00b07dd125eb93", "type": "Verlichting", "lat": 52.3704334, "lon": 4.525336, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.809adb88a15b415fb06ffc3eee177958", "type": "Verlichting", "lat": 52.3690385, "lon": 4.5261451, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.92753cd4de7c4ae4a240d37d9d8f027a", "type": "Verlichting", "lat": 52.3692722, "lon": 4.5264801, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.acedf55ba354451586b7d1b106e779bd", "type": "Verlichting", "lat": 52.3696457, "lon": 4.5275077, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.b089d906a85244b3be44a97cda9295b1", "type": "Verlichting", "lat": 52.3675229, "lon": 4.5227686, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.ba6234d1a1ec407f88d35810f05f165c", "type": "Verlichting", "lat": 52.3700357, "lon": 4.5246802, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.cea259df04c24c4da02b2187816464ef", "type": "Verlichting", "lat": 52.3693573, "lon": 4.5268203, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.e3654b9f5d7144278b7fb1f48c723b7d", "type": "Verlichting", "lat": 52.3700905, "lon": 4.527657, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.ede7dc5525c34e02a0c11b6cbdc41533", "type": "Verlichting", "lat": 52.3700465, "lon": 4.5249485, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.f16d7f96c91348be8ce828287cb11635", "type": "Verlichting", "lat": 52.3693611, "lon": 4.5274358, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.0fc4cdbcc677414f957535e5c4eaf92d", "type": "Verlichting", "lat": 52.367595, "lon": 4.5217203, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.3a2906cf027948b0af70f25f4eeb17e6", "type": "Verlichting", "lat": 52.3694674, "lon": 4.5229166, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.545893bb84da473fac34e37d97d2a619", "type": "Verlichting", "lat": 52.3687845, "lon": 4.5224673, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.5930c550df534decaaafb80f54a9019c", "type": "Verlichting", "lat": 52.3692218, "lon": 4.5227427, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.60743bfbb5be4c4ba25c9850caf59ec7", "type": "Verlichting", "lat": 52.3698316, "lon": 4.5232674, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.67aab6abe94441ec9282be9b8c3fb143", "type": "Verlichting", "lat": 52.3677903, "lon": 4.521843, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.7701110380994f709f7c76c60c19cd96", "type": "Verlichting", "lat": 52.3681804, "lon": 4.5220948, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.7a8b6de3ffa24036b2994bc449aa84eb", "type": "Verlichting", "lat": 52.3699543, "lon": 4.5234835, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.7ddcf88e08eb4b749db19102f83b76b1", "type": "Verlichting", "lat": 52.3683821, "lon": 4.5222198, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.8a9322fa13be4574926c3964a9152c7d", "type": "Verlichting", "lat": 52.3676246, "lon": 4.5220709, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.c02ef3f0741e44fd8a9b5fa1d70a4fd6", "type": "Verlichting", "lat": 52.3696965, "lon": 4.5231043, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.c571d9b7f9c044bd8b79c40e12f6ec6a", "type": "Verlichting", "lat": 52.3689779, "lon": 4.5225809, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.e1c3f72f506b4b0baab08f53c765a049", "type": "Verlichting", "lat": 52.3686166, "lon": 4.5223678, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.f1502538c4604ecf91c74f4412007ae1", "type": "Verlichting", "lat": 52.3679784, "lon": 4.5219656, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.0125b32d91ee48a988bdcb4fe95925ad", "type": "Verlichting", "lat": 52.3714859, "lon": 4.5243373, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.043f38c4736240eda9723c8d0f625068", "type": "Verlichting", "lat": 52.3706528, "lon": 4.5237509, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.28f3fb9a6a6d4fcb8c547d46006090b1", "type": "Verlichting", "lat": 52.3710701, "lon": 4.5240552, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.305ef1b417ca419f923a6bdeef636d79", "type": "Verlichting", "lat": 52.3702268, "lon": 4.5234424, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.361de86ee5d4448ea99862fa82121f08", "type": "Verlichting", "lat": 52.3708336, "lon": 4.5237591, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.70b16a004e6a4019935123afc71c8d6f", "type": "Verlichting", "lat": 52.370049, "lon": 4.5237081, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.7e975e2e3cf344a0bca962b6835c6b31", "type": "Verlichting", "lat": 52.3708698, "lon": 4.5239088, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.915bc621cf914d4d94c7442c52fece83", "type": "Verlichting", "lat": 52.369944, "lon": 4.5231023, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.a0cc5f1cb2b8462fac15604a033a2911", "type": "Verlichting", "lat": 52.3714873, "lon": 4.524214, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.b86610ca523a4807986dbbd6243d67ab", "type": "Verlichting", "lat": 52.3708313, "lon": 4.523743, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.ce99bd8ac42741d0819f4d1e4e667671", "type": "Verlichting", "lat": 52.3714801, "lon": 4.5242229, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.e47f27f8d1b647d5876aa1e985028e77", "type": "Verlichting", "lat": 52.3704256, "lon": 4.5235865, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.ed7d67a9b0a244ada2ea96f4f9e313cf", "type": "Verlichting", "lat": 52.3712828, "lon": 4.5242081, "source": "bgt", "extra": {"collectie": "paal", "bronhouder": "G0473", "subtype": "lichtmast"}}, {"id": "G0473.ebde47f89a114008b3f9ee9cf5edafb5", "type": "Afvalbak", "lat": 52.3710664, "lon": 4.5254174, "source": "bgt", "extra": {"collectie": "bak", "bronhouder": "G0473", "subtype": "afval apart plaats"}}, {"id": "G0473.f9c9f909d9084f68838aec32ae428ec6", "type": "Afvalbak", "lat": 52.3710821, "lon": 4.525439, "source": "bgt", "extra": {"collectie": "bak", "bronhouder": "G0473", "subtype": "afval apart plaats"}}, {"id": "G0473.c8e212da114f4d1392a98c3ebb865597", "type": "Afvalbak", "lat": 52.3707804, "lon": 4.5268913, "source": "bgt", "extra": {"collectie": "bak", "bronhouder": "G0473", "subtype": "afval apart plaats"}}, {"id": "G0473.1608e68dc5f548f4848d2f423f9e22fb", "type": "Meubilair", "lat": 52.3705698, "lon": 4.52471, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.31354db292b0449ab381348ec370a6ad", "type": "Meubilair", "lat": 52.3697826, "lon": 4.5241632, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.8d12f5b9883c41b084faabd4436b016a", "type": "Meubilair", "lat": 52.3681218, "lon": 4.5243834, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.9b458b3abea74a3ca1e4630671c300b6", "type": "Meubilair", "lat": 52.36833, "lon": 4.5232015, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.a2d0cd8524aa41be812727c13314da8d", "type": "Meubilair", "lat": 52.3688575, "lon": 4.5257713, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.63e55604af2f4518add7952d6d662993", "type": "Meubilair", "lat": 52.3674467, "lon": 4.5233178, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.41d106220cd94dcca6a900e9047dd5ff", "type": "Meubilair", "lat": 52.3699504, "lon": 4.5234764, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.b8c4dd0cd9744f93ae0c0a873e5bf82d", "type": "Meubilair", "lat": 52.3711993, "lon": 4.5241587, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.1bdf0faddd0f45bb87dc56475b0d21e9", "type": "Meubilair", "lat": 52.3705342, "lon": 4.5258107, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}, {"id": "G0473.d3c23899d77247e7afe2d514cc4e2a41", "type": "Meubilair", "lat": 52.3706278, "lon": 4.5278087, "source": "bgt", "extra": {"collectie": "straatmeubilair", "bronhouder": "G0473", "subtype": "betaalautomaat"}}];
+    var polygonCoords = [[[[52.368243, 4.521207], [52.367565, 4.521684], [52.367395, 4.522682], [52.367385, 4.523358], [52.367925, 4.524447], [52.368908, 4.52611], [52.369298, 4.527542], [52.370389, 4.527955], [52.371053, 4.528127], [52.371482, 4.525965], [52.371568, 4.525235], [52.371653, 4.523315], [52.368243, 4.521207]]]];
+
+    // =========================================================================
+    // Map init
+    // =========================================================================
+    var map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([52.325, 4.761], 14);
+
+    var osmLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd'
+    }).addTo(map);
+
+    var aerialLayer = L.tileLayer(
+        'https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
+        { maxZoom: 19, attribution: '&copy; PDOK Luchtfoto' }
+    );
+
+    // Draw polygon boundary on map
+    var allPoints = [];
+    polygonCoords.forEach(function(rings) {
+        rings.forEach(function(ring) {
+            ring.forEach(function(p) { allPoints.push(p); });
+            L.polyline(ring.concat([ring[0]]), {
+                color: '#2266cc', weight: 2.5, opacity: 0.6,
+                dashArray: '8,6', fill: false
+            }).addTo(map);
+        });
+    });
+    if (allPoints.length > 0) {
+        map.fitBounds(L.latLngBounds(allPoints), { padding: [20, 20] });
+    }
+
+    // =========================================================================
+    // Container (asset) layers
+    // =========================================================================
+    var CONTAINER_COLORS = {"Verkeersbord": "#555", "Verlichting": "#555", "Paal": "#555", "Afvalbak": "#555", "Meubilair": "#555"};
+    var CONTAINER_SHAPES = {"Verkeersbord": "triangle", "Verlichting": "diamond", "Paal": "square", "Afvalbak": "invtriangle", "Meubilair": "star"};
+    var DEFAULT_COLOR = '#555';
+
+    // =========================================================================
+    // Custom shape markers (canvas-based, same performance as circleMarker)
+    // =========================================================================
+    L.ShapeMarker = L.CircleMarker.extend({
+        options: { shape: 'circle' },
+        _updatePath: function() {
+            var p = this._point;
+            var r = this._radius;
+            var ctx = this._renderer._ctx;
+            var shape = this.options.shape;
+
+            ctx.beginPath();
+            if (shape === 'triangle') {
+                ctx.moveTo(p.x, p.y - r);
+                ctx.lineTo(p.x + r, p.y + r * 0.7);
+                ctx.lineTo(p.x - r, p.y + r * 0.7);
+            } else if (shape === 'invtriangle') {
+                ctx.moveTo(p.x, p.y + r);
+                ctx.lineTo(p.x + r, p.y - r * 0.7);
+                ctx.lineTo(p.x - r, p.y - r * 0.7);
+            } else if (shape === 'square') {
+                var s = r * 0.8;
+                ctx.rect(p.x - s, p.y - s, s * 2, s * 2);
+            } else if (shape === 'diamond') {
+                ctx.moveTo(p.x, p.y - r);
+                ctx.lineTo(p.x + r * 0.7, p.y);
+                ctx.lineTo(p.x, p.y + r);
+                ctx.lineTo(p.x - r * 0.7, p.y);
+            } else if (shape === 'star') {
+                for (var i = 0; i < 5; i++) {
+                    var a1 = (i * 72 - 90) * Math.PI / 180;
+                    var a2 = ((i * 72) + 36 - 90) * Math.PI / 180;
+                    ctx.lineTo(p.x + Math.cos(a1) * r, p.y + Math.sin(a1) * r);
+                    ctx.lineTo(p.x + Math.cos(a2) * r * 0.45, p.y + Math.sin(a2) * r * 0.45);
+                }
+            } else {
+                // Default: circle
+                ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            }
+            ctx.closePath();
+            this._renderer._fillStroke(ctx, this);
+        }
+    });
+
+    var containerLayers = {};
+    var containerCounts = {};
+    var containerVisible = {};
+    var markerIndex = []; // {marker, lat, lon, id} for visit detection
+    var visited = new Set();
+    var VISITED_COLOR = '#34C759';
+    var totalDistanceM = 0;
+
+    function saveVisited() {
+        try { localStorage.setItem('visited', JSON.stringify(Array.from(visited))); } catch(e) {}
+    }
+
+    function updateVisitCounter() {
+        var km = (totalDistanceM / 1000).toFixed(1);
+        document.getElementById('visit-counter').textContent = '\u2713 ' + visited.size + ' / ' + containers.length + '  |  ' + km + ' km';
+    }
+
+    containers.forEach(function(c) {
+        var t = c.type || 'onbekend';
+        if (!containerLayers[t]) {
+            containerLayers[t] = L.layerGroup().addTo(map);
+            containerCounts[t] = 0;
+            containerVisible[t] = true;
+        }
+        containerCounts[t]++;
+
+        var isVisited = visited.has(c.id);
+        var color = isVisited ? VISITED_COLOR : DEFAULT_COLOR;
+        var shape = CONTAINER_SHAPES[t] || 'circle';
+        var m = new L.ShapeMarker([c.lat, c.lon], {
+            radius: 6, color: 'white', fillColor: color,
+            fillOpacity: 0.9, weight: 1.5, shape: shape
+        });
+
+        var html = '<div class="mob-popup"><div class="pop-title">' + t + '</div>';
+        if (c.extra) {
+            for (var k in c.extra) {
+                if (c.extra[k] !== null && c.extra[k] !== '') {
+                    html += '<div class="pop-row"><span class="pop-key">' + k + '</span><span class="pop-val">' + c.extra[k] + '</span></div>';
+                }
+            }
+        }
+        html += '<div class="pop-row"><span class="pop-key">lat/lon</span><span class="pop-val">' + c.lat.toFixed(5) + ', ' + c.lon.toFixed(5) + '</span></div>';
+        html += '</div>';
+        m.bindPopup(html);
+        containerLayers[t].addLayer(m);
+        markerIndex.push({marker: m, lat: c.lat, lon: c.lon, id: c.id});
+    });
+
+    updateVisitCounter();
+
+    function shapeIcon(shape, color) {
+        var s = '<svg width="16" height="16" viewBox="0 0 16 16">';
+        if (shape === 'triangle') {
+            s += '<polygon points="8,2 14,13 2,13" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'invtriangle') {
+            s += '<polygon points="8,14 14,3 2,3" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'square') {
+            s += '<rect x="2.5" y="2.5" width="11" height="11" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'diamond') {
+            s += '<polygon points="8,1 14,8 8,15 2,8" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'star') {
+            s += '<polygon points="8,1 9.8,6 15,6.5 11,10.5 12.5,15 8,12 3.5,15 5,10.5 1,6.5 6.2,6" fill="' + color + '" stroke="white" stroke-width="0.8"/>';
+        } else {
+            s += '<circle cx="8" cy="8" r="6" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        }
+        return s + '</svg>';
+    }
+
+    // =========================================================================
+    // Bottom sheet: asset toggles
+    // =========================================================================
+    var sheetContent = document.getElementById('sheet-content');
+
+    // Count subtypes per group
+    var subtypeCounts = {};
+    containers.forEach(function(c) {
+        var sub = c.extra && c.extra.subtype ? c.extra.subtype : c.type;
+        var group = c.type;
+        if (!subtypeCounts[group]) subtypeCounts[group] = {};
+        subtypeCounts[group][sub] = (subtypeCounts[group][sub] || 0) + 1;
+    });
+
+    // Split types into shaped (configured) and overig (circle/default)
+    var shapedTypes = [];
+    var overigTypes = [];
+    Object.keys(containerLayers).forEach(function(type) {
+        if (CONTAINER_SHAPES[type] && CONTAINER_SHAPES[type] !== 'circle') {
+            shapedTypes.push(type);
+        } else {
+            overigTypes.push(type);
+        }
+    });
+
+    function addSheetRow(label, shape, color, types) {
+        var count = 0;
+        types.forEach(function(t) { count += containerCounts[t] || 0; });
+
+        var wrapper = document.createElement('div');
+
+        var row = document.createElement('div');
+        row.className = 'asset-row';
+        row.innerHTML =
+            '<div class="asset-dot">' + shapeIcon(shape, color) + '</div>' +
+            '<div class="asset-label">' + label + '</div>' +
+            '<div class="asset-count-badge">' + count + '</div>' +
+            '<div class="toggle on"></div>';
+
+        // Build subtype detail panel
+        var detail = document.createElement('div');
+        detail.style.cssText = 'display:none;padding:0 0 8px 40px;font-size:13px;color:#666;';
+        var subs = {};
+        types.forEach(function(t) {
+            if (subtypeCounts[t]) {
+                for (var s in subtypeCounts[t]) {
+                    subs[s] = (subs[s] || 0) + subtypeCounts[t][s];
+                }
+            }
+        });
+        var subKeys = Object.keys(subs).sort(function(a, b) { return subs[b] - subs[a]; });
+        if (subKeys.length > 1 || (subKeys.length === 1 && subKeys[0] !== label)) {
+            subKeys.forEach(function(s) {
+                var line = document.createElement('div');
+                line.style.cssText = 'display:flex;justify-content:space-between;padding:2px 12px 2px 0;';
+                line.innerHTML = '<span>' + s + '</span><span style="color:#999;">' + subs[s] + '</span>';
+                detail.appendChild(line);
+            });
+        }
+
+        var visible = true;
+        var detailOpen = false;
+        row.addEventListener('click', function(e) {
+            // Toggle on the right side = visibility toggle
+            var rect = row.querySelector('.toggle').getBoundingClientRect();
+            if (e.clientX > rect.left - 20) {
+                visible = !visible;
+                row.querySelector('.toggle').classList.toggle('on', visible);
+                types.forEach(function(t) {
+                    containerVisible[t] = visible;
+                    if (visible) { containerLayers[t].addTo(map); }
+                    else { map.removeLayer(containerLayers[t]); }
+                });
+            } else {
+                // Click on label/icon = expand subtypes
+                detailOpen = !detailOpen;
+                detail.style.display = detailOpen ? 'block' : 'none';
+            }
+        });
+
+        wrapper.appendChild(row);
+        if (detail.children.length > 0) wrapper.appendChild(detail);
+        sheetContent.appendChild(wrapper);
+    }
+
+    shapedTypes.forEach(function(type) {
+        addSheetRow(type, CONTAINER_SHAPES[type], CONTAINER_COLORS[type] || DEFAULT_COLOR, [type]);
+    });
+    if (overigTypes.length > 0) {
+        addSheetRow('Overig', 'circle', DEFAULT_COLOR, overigTypes);
+    }
+
+    // =========================================================================
+    // Bottom sheet open/close
+    // =========================================================================
+    var sheet = document.getElementById('sheet');
+    var sheetOpen = false;
+
+    document.getElementById('sheet-handle').addEventListener('click', function() {
+        sheetOpen = !sheetOpen;
+        sheet.classList.toggle('open', sheetOpen);
+        document.body.classList.toggle('sheet-open', sheetOpen);
+    });
+
+    // =========================================================================
+    // GPS & Route tracking
+    // =========================================================================
+    var locationMarker = null;
+    var locationCircle = null;
+    var watchId = null;
+    var routePoints = [];
+    var routeLine = null;
+    var locating = false;
+    var wakeLock = null;
+    var lastGpsLat = null;
+    var lastGpsLon = null;
+    var debugLog = [];
+    var debugEl = document.getElementById('debug-panel');
+    function dbg(msg) {
+        var ts = new Date().toLocaleTimeString('nl-NL', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        debugLog.push(ts + ' ' + msg);
+        if (debugLog.length > 500) debugLog.shift();
+        debugEl.textContent = debugLog.join('\n');
+        debugEl.scrollTop = debugEl.scrollHeight;
+    }
+
+    function saveRoute() {
+        try { localStorage.setItem('routePoints', JSON.stringify(routePoints)); } catch(e) {}
+    }
+
+    function calcTotalDistance() {
+        totalDistanceM = 0;
+        for (var i = 1; i < routePoints.length; i++) {
+            totalDistanceM += haversineM(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+        }
+    }
+
+    // Resume or start fresh
+    function resumeRit(doResume) {
+        document.getElementById('resume-toast').classList.remove('show');
+        if (doResume) {
+            try {
+                var saved = JSON.parse(localStorage.getItem('routePoints') || '[]');
+                routePoints = saved.map(function(p) {
+                    if (Array.isArray(p)) return {lat: p[0], lon: p[1], t: 0};
+                    return p;
+                });
+            } catch(e) {}
+            try { JSON.parse(localStorage.getItem('visited') || '[]').forEach(function(id) { visited.add(id); }); } catch(e) {}
+            // Re-color visited markers
+            markerIndex.forEach(function(mi) {
+                if (visited.has(mi.id)) mi.marker.setStyle({fillColor: VISITED_COLOR});
+            });
+            calcTotalDistance();
+            // Restore route arrows
+            routeArrows.clearLayers();
+            arrowDistAcc = 0;
+            for (var i = 1; i < routePoints.length; i++) {
+                var segD = haversineM(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+                arrowDistAcc += segD;
+                if (arrowDistAcc >= 20) {
+                    addRouteArrow(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+                    arrowDistAcc = 0;
+                }
+            }
+            updateRouteLine();
+        } else {
+            routePoints = [];
+            visited.clear();
+            try { localStorage.removeItem('routePoints'); localStorage.removeItem('visited'); } catch(e) {}
+        }
+        updateVisitCounter();
+    }
+
+    // Check for saved rit on load
+    var hasSavedRit = false;
+    try {
+        var sr = JSON.parse(localStorage.getItem('routePoints') || '[]');
+        var sv = JSON.parse(localStorage.getItem('visited') || '[]');
+        hasSavedRit = sr.length > 0 || sv.length > 0;
+    } catch(e) {}
+    if (hasSavedRit) {
+        document.getElementById('resume-toast').classList.add('show');
+    }
+
+    function distToSegmentM(pLat, pLon, aLat, aLon, bLat, bLon) {
+        // Shortest distance from point P to line segment A-B (in meters)
+        // Project P onto AB, clamp to segment, return haversine distance
+        var dxAB = bLon - aLon, dyAB = bLat - aLat;
+        var dxAP = pLon - aLon, dyAP = pLat - aLat;
+        var lenSq = dxAB * dxAB + dyAB * dyAB;
+        if (lenSq === 0) return haversineM(pLat, pLon, aLat, aLon);
+        var t = Math.max(0, Math.min(1, (dxAP * dxAB + dyAP * dyAB) / lenSq));
+        var projLat = aLat + t * dyAB;
+        var projLon = aLon + t * dxAB;
+        return haversineM(pLat, pLon, projLat, projLon);
+    }
+
+    function haversineM(lat1, lon1, lat2, lon2) {
+        var R = 6371000;
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    var routeArrows = L.layerGroup().addTo(map);
+    var arrowDistAcc = 0; // accumulated distance since last arrow
+
+    function addRouteArrow(lat1, lon1, lat2, lon2) {
+        var angle = Math.atan2(lat2 - lat1, lon2 - lon1) * 180 / Math.PI;
+        var midLat = (lat1 + lat2) / 2;
+        var midLon = (lon1 + lon2) / 2;
+        var icon = L.divIcon({
+            className: '',
+            html: '<svg width="20" height="20" viewBox="0 0 20 20" style="transform:rotate(' + (90 - angle) + 'deg)"><path d="M10 2L17 14L10 11L3 14Z" fill="#CC2020" stroke="white" stroke-width="1.5"/></svg>',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
+        routeArrows.addLayer(L.marker([midLat, midLon], {icon: icon, interactive: false}));
+    }
+
+    function updateRouteLine() {
+        if (routePoints.length < 2) return;
+        var coords = routePoints.map(function(p) { return [p.lat, p.lon]; });
+        if (routeLine) {
+            routeLine.setLatLngs(coords);
+        } else {
+            routeLine = L.polyline(coords, {
+                color: '#FF3B30', weight: 4,
+                opacity: 0.85, lineJoin: 'round', lineCap: 'round'
+            }).addTo(map);
+        }
+    }
+
+    // Restore saved route on load
+    updateRouteLine();
+
+    document.getElementById('btn-locate').addEventListener('click', function() {
+        if (!navigator.geolocation) { alert('Geolocation niet beschikbaar.'); return; }
+        var btn = this;
+
+        if (locating) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+            locating = false;
+            btn.classList.remove('active', 'seeking');
+            if (locationMarker) { map.removeLayer(locationMarker); locationMarker = null; }
+            if (locationCircle) { map.removeLayer(locationCircle); locationCircle = null; }
+            // Release wake lock
+            if (wakeLock) { wakeLock.release().catch(function(){}); wakeLock = null; }
+            // Toast
+            var toast = document.getElementById('toast');
+            toast.textContent = 'GPS gestopt \u2014 ' + visited.size + ' van ' + containers.length + ' assets bezocht';
+            toast.classList.add('show');
+            setTimeout(function() { toast.classList.remove('show'); }, 4000);
+            return;
+        }
+
+        locating = true;
+        btn.classList.add('seeking');
+        var gpsStartTime = Date.now();
+
+        // Wake lock — keep screen on
+        if (navigator.wakeLock) {
+            navigator.wakeLock.request('screen').then(function(wl) { wakeLock = wl; }).catch(function(){});
+        }
+
+        watchId = navigator.geolocation.watchPosition(function(pos) {
+            var lat = pos.coords.latitude;
+            var lon = pos.coords.longitude;
+            var acc = pos.coords.accuracy;
+
+            // First fix: switch from seeking (orange) to active (green)
+            btn.classList.remove('seeking');
+            btn.classList.add('active');
+
+            if (locationMarker) {
+                locationMarker.setLatLng([lat, lon]);
+                locationCircle.setLatLng([lat, lon]).setRadius(acc);
+            } else {
+                locationMarker = L.circleMarker([lat, lon], {
+                    radius: 10, color: '#fff', weight: 2.5,
+                    fillColor: '#007AFF', fillOpacity: 1,
+                    zIndexOffset: 1000
+                }).addTo(map);
+                locationCircle = L.circle([lat, lon], {
+                    radius: acc, color: '#007AFF',
+                    fillColor: '#007AFF', fillOpacity: 0.1, weight: 1
+                }).addTo(map);
+                map.setView([lat, lon], 19);
+            }
+
+            map.panTo([lat, lon]);
+
+            dbg('GPS lat=' + lat.toFixed(6) + ' lon=' + lon.toFixed(6) + ' acc=' + acc.toFixed(1) + 'm');
+
+            // Filter: alleen goede punten toevoegen aan route
+            var dominated = false;
+            var filterReason = '';
+            if (Date.now() - gpsStartTime < 5000) { dominated = true; filterReason = 'warmup'; }
+            if (!dominated && acc > 25) { dominated = true; filterReason = 'acc>' + acc.toFixed(0); }
+            if (!dominated && routePoints.length > 0) {
+                var last = routePoints[routePoints.length - 1];
+                var dist = haversineM(last.lat, last.lon, lat, lon);
+                var dt = (pos.timestamp - last.t) / 1000;
+                if (dt > 0 && dist / dt > 11) { dominated = true; filterReason = 'speed>' + (dist/dt).toFixed(1); }
+                if (!dominated && dist < 3) { dominated = true; filterReason = 'dist<3 (' + dist.toFixed(1) + ')'; }
+            }
+            if (dominated) {
+                dbg('  ROUTE punt gefilterd: ' + filterReason);
+            } else {
+                var newPt = {lat: lat, lon: lon, t: pos.timestamp};
+                if (routePoints.length > 0) {
+                    var prev = routePoints[routePoints.length - 1];
+                    var segDist = haversineM(prev.lat, prev.lon, lat, lon);
+                    totalDistanceM += segDist;
+                    arrowDistAcc += segDist;
+                    if (arrowDistAcc >= 20) {
+                        addRouteArrow(prev.lat, prev.lon, lat, lon);
+                        arrowDistAcc = 0;
+                    }
+                }
+                routePoints.push(newPt);
+                updateRouteLine();
+                updateVisitCounter();
+                saveRoute();
+                dbg('  ROUTE punt geaccepteerd (#' + routePoints.length + ')');
+            }
+
+            // Visit detection: check proximity to line segment from last GPS position to current
+            var pLat = (lastGpsLat !== null) ? lastGpsLat : lat;
+            var pLon = (lastGpsLon !== null) ? lastGpsLon : lon;
+            var segLen = haversineM(pLat, pLon, lat, lon);
+            var changed = false;
+            var nearCount = 0;
+            for (var i = 0; i < markerIndex.length; i++) {
+                var mi = markerIndex[i];
+                if (visited.has(mi.id)) continue;
+                var d = distToSegmentM(mi.lat, mi.lon, pLat, pLon, lat, lon);
+                if (d <= 20) {
+                    nearCount++;
+                    if (d <= 8) {
+                        visited.add(mi.id);
+                        mi.marker.setStyle({fillColor: VISITED_COLOR});
+                        changed = true;
+                        dbg('  VISIT ' + mi.id.substring(0,12) + ' d=' + d.toFixed(1) + 'm type=' + (containers.find(function(c){return c.id===mi.id})||{}).type);
+                    } else {
+                        dbg('  DICHTBIJ ' + mi.id.substring(0,12) + ' d=' + d.toFixed(1) + 'm (>8m, niet bezocht)');
+                    }
+                }
+            }
+            dbg('  segment=' + segLen.toFixed(1) + 'm prev=' + pLat.toFixed(6) + ',' + pLon.toFixed(6) + ' nabij=' + nearCount);
+            if (changed) {
+                updateVisitCounter();
+                saveVisited();
+            }
+            lastGpsLat = lat;
+            lastGpsLon = lon;
+
+        }, function(err) {
+            alert('Locatie fout: ' + err.message);
+            locating = false;
+            btn.classList.remove('active', 'seeking');
+        }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    });
+
+    // Clear route
+    document.getElementById('btn-clear-route').addEventListener('click', function() {
+        if (routePoints.length === 0 && visited.size === 0) return;
+        if (!confirm('Gereden route en bezochte assets wissen?')) return;
+        routePoints = [];
+        totalDistanceM = 0;
+        arrowDistAcc = 0;
+        if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        routeArrows.clearLayers();
+        // Reset visited markers
+        visited.clear();
+        markerIndex.forEach(function(mi) {
+            mi.marker.setStyle({fillColor: DEFAULT_COLOR});
+        });
+        saveRoute();
+        saveVisited();
+        updateVisitCounter();
+    });
+
+    // Layer toggle
+    var showingAerial = false;
+    document.getElementById('btn-layers').addEventListener('click', function() {
+        if (showingAerial) {
+            map.removeLayer(aerialLayer);
+            osmLayer.addTo(map);
+        } else {
+            map.removeLayer(osmLayer);
+            aerialLayer.addTo(map);
+        }
+        showingAerial = !showingAerial;
+        // Toggle icon opacity to indicate active state
+        this.style.opacity = showingAerial ? '0.7' : '1';
+    });
+
+</script>
+</body>
+</html>
