@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Nijmegen Run 03</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+        #map { position: absolute; inset: 0; z-index: 1; }
+
+        /* Floating action buttons */
+        #fab-group {
+            position: absolute;
+            bottom: 120px;
+            right: 16px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transition: bottom 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        body.sheet-open #fab-group { bottom: calc(55vh + 100px); }
+        .fab {
+            width: 52px; height: 52px;
+            border-radius: 50%;
+            border: none;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+            font-size: 22px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .fab:active { transform: scale(0.93); }
+        #btn-locate { background: white; color: #333; }
+        #btn-locate.seeking { background: #FF9500; color: white; }
+        #btn-locate.active { background: #34C759; color: white; }
+        #btn-clear { background: white; color: #FF3B30; }
+        #btn-layers { background: white; color: #333; }
+
+        /* Bottom sheet */
+        #sheet {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            z-index: 999;
+            background: white;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+            transform: translateY(calc(100% - 72px));
+            transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        #sheet.open { transform: translateY(0); }
+
+        #sheet-handle {
+            display: flex; align-items: center; justify-content: center;
+            padding: 12px 0 8px;
+            cursor: pointer;
+        }
+        #sheet-handle::before {
+            content: '';
+            width: 36px; height: 4px;
+            background: #ddd;
+            border-radius: 2px;
+        }
+
+        #sheet-title {
+            padding: 0 20px 12px;
+            font-size: 17px; font-weight: 700; color: #111;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        #asset-count {
+            font-size: 13px; font-weight: 400; color: #888;
+        }
+
+        #sheet-content {
+            padding: 0 16px 32px;
+            overflow-y: auto;
+            max-height: 55vh;
+        }
+
+        /* Asset toggle rows */
+        .asset-row {
+            display: flex;
+            align-items: center;
+            padding: 13px 4px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .asset-row:last-child { border-bottom: none; }
+        .asset-dot {
+            width: 16px; height: 16px;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        .asset-dot svg { display: block; }
+        .asset-label {
+            flex: 1;
+            font-size: 16px;
+            color: #111;
+        }
+        .asset-count-badge {
+            font-size: 13px;
+            color: #999;
+            margin-right: 12px;
+        }
+        .toggle {
+            width: 48px; height: 28px;
+            border-radius: 14px;
+            background: #E5E5EA;
+            position: relative;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        .toggle.on { background: #34C759; }
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            background: white;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+            transition: left 0.2s;
+        }
+        .toggle.on::after { left: 22px; }
+
+        /* Leaflet overrides for mobile */
+        .leaflet-control-zoom { display: none; }
+        .leaflet-control-layers {
+            border-radius: 12px !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2) !important;
+        }
+
+        /* Popup style */
+        .sheet-btn {
+            display: inline-block;
+            margin: 0 8px 12px 20px;
+            padding: 6px 14px;
+            font-size: 13px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        #btn-clear-route {
+            color: #FF3B30;
+            background: #FFF0F0;
+            border: 1px solid #FFD4D4;
+        }
+        #btn-export {
+            color: #007AFF;
+            background: #F0F4FF;
+            border: 1px solid #D4DFFF;
+        }
+
+        /* Visit counter */
+        #visit-counter {
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 15px;
+            font-weight: 600;
+            pointer-events: none;
+        }
+
+        /* Toast */
+        #toast {
+            position: absolute;
+            bottom: 140px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1100;
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        #toast.show { opacity: 1; }
+
+        /* Resume toast */
+        #resume-toast {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1200;
+            background: white;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            text-align: center;
+            display: none;
+        }
+        #resume-toast.show { display: block; }
+        #resume-toast p { font-size: 15px; color: #333; margin-bottom: 16px; }
+        #resume-toast button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 0 6px;
+        }
+        #resume-toast .btn-continue { background: #34C759; color: white; }
+        #resume-toast .btn-new { background: #E5E5EA; color: #333; }
+
+
+        /* Debug log */
+        #debug-panel {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 2000;
+            background: rgba(0,0,0,0.9);
+            color: #0f0;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 40px 10px 10px;
+            overflow-y: auto;
+            display: none;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        #debug-panel.show { display: block; }
+        #debug-close {
+            position: fixed;
+            top: 8px; right: 12px;
+            z-index: 2001;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            display: none;
+        }
+        #debug-panel.show ~ #debug-close { display: block; }
+
+        .mob-popup { font-size: 14px; line-height: 1.6; min-width: 200px; }
+        .mob-popup .pop-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+        .mob-popup .pop-row { display: flex; justify-content: space-between; gap: 8px; }
+        .mob-popup .pop-key { color: #888; font-size: 12px; }
+        .mob-popup .pop-val { font-size: 13px; text-align: right; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="version-label" style="position:absolute;top:8px;right:8px;z-index:1000;font-size:9px;color:rgba(255,255,255,0.7);background:rgba(0,0,0,0.4);padding:2px 6px;border-radius:4px;cursor:pointer;" onclick="document.getElementById('debug-panel').classList.toggle('show')">1948d49</div>
+<div id="debug-panel"></div>
+<div id="debug-close" onclick="document.getElementById('debug-panel').classList.remove('show')">&times;</div>
+<div id="visit-counter"></div>
+<div id="toast"></div>
+<div id="resume-toast">
+    <p>Vorige rit gevonden.<br>Doorgaan of nieuwe rit?</p>
+    <button class="btn-continue" onclick="resumeRit(true)">Doorgaan</button>
+    <button class="btn-new" onclick="resumeRit(false)">Nieuwe rit</button>
+</div>
+
+<!-- Floating buttons -->
+<div id="fab-group">
+    <button class="fab" id="btn-layers" title="Kaartlaag">
+        <svg id="icon-layers" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+    </button>
+    <button class="fab" id="btn-locate" title="Mijn locatie">
+        <svg id="icon-locate" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+    </button>
+</div>
+
+<!-- Bottom sheet -->
+<div id="sheet">
+    <div id="sheet-handle"></div>
+    <div id="sheet-title">
+        Assets
+        <span id="asset-count">357 punten</span>
+    </div>
+    <button class="sheet-btn" id="btn-export">Deel resultaten</button>
+    <button class="sheet-btn" id="btn-clear-route">Wis gereden route</button>
+    <div id="sheet-content"></div>
+</div>
+
+<script>
+
+    var containers = [{"id": "BB001", "type": "BGP291", "lat": 51.8248898, "lon": 5.7646504, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB002", "type": "BGP291", "lat": 51.8248607, "lon": 5.7651029, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "8.0", "lamptype": "LED", "jaar_van_aanleg": "2019.0", "kastgebied": "BB"}}, {"id": "BB003", "type": "BGP291", "lat": 51.8248372, "lon": 5.7655512, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB004", "type": "BGP291", "lat": 51.8247395, "lon": 5.7658858, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB005", "type": "BGP291", "lat": 51.8247898, "lon": 5.7664968, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB006", "type": "BGP291", "lat": 51.8247768, "lon": 5.7669271, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB007", "type": "BGP291", "lat": 51.8247647, "lon": 5.7673916, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2008.0", "kastgebied": "BB"}}, {"id": "BB008", "type": "BGP291", "lat": 51.824755, "lon": 5.7678519, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB009", "type": "BGP291", "lat": 51.8247491, "lon": 5.7683157, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB010", "type": "BGP291", "lat": 51.824745, "lon": 5.7687804, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB011", "type": "BGP291", "lat": 51.8247445, "lon": 5.7692447, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "2008.0", "kastgebied": "BB"}}, {"id": "BB012", "type": "BGP291", "lat": 51.8247707, "lon": 5.7698745, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB013", "type": "BGP291", "lat": 51.8249204, "lon": 5.7699421, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2004.0", "kastgebied": "BB"}}, {"id": "BB014", "type": "BGP291", "lat": 51.8251554, "lon": 5.7700486, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2002.0", "kastgebied": "BB"}}, {"id": "BB015", "type": "BGP291", "lat": 51.8253916, "lon": 5.770156, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2008.0", "kastgebied": "BB"}}, {"id": "BB016", "type": "BGP291", "lat": 51.8256262, "lon": 5.7702654, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2019.0", "kastgebied": "BB"}}, {"id": "BB017", "type": "BGP291", "lat": 51.8259293, "lon": 5.7703025, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB018", "type": "BGP291", "lat": 51.8259621, "lon": 5.7699588, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "8.0", "lamptype": "LED", "jaar_van_aanleg": "2017.0", "kastgebied": "BB"}}, {"id": "BB019", "type": "BGP291", "lat": 51.8261141, "lon": 5.7695534, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB020", "type": "BGP291", "lat": 51.8262759, "lon": 5.7691215, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB021", "type": "BGP291", "lat": 51.8263973, "lon": 5.7687917, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB022", "type": "BGP291", "lat": 51.8265316, "lon": 5.7684267, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB023", "type": "BGP291", "lat": 51.8266612, "lon": 5.7680723, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB024", "type": "BGP291", "lat": 51.826861, "lon": 5.7677599, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "8.0", "lamptype": "LED", "jaar_van_aanleg": "2016.0", "kastgebied": "BB"}}, {"id": "BB025", "type": "BGP291", "lat": 51.8269268, "lon": 5.7673245, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "8.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB026", "type": "BGP291", "lat": 51.8270547, "lon": 5.7669556, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB027", "type": "BGP291", "lat": 51.8271837, "lon": 5.7665856, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "8.0", "lamptype": "LED", "jaar_van_aanleg": "2016.0", "kastgebied": "BB"}}, {"id": "BB028", "type": "BGP291", "lat": 51.8273086, "lon": 5.7662134, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB029", "type": "ESSENZ", "lat": 51.8274336, "lon": 5.7658422, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB030", "type": "BGP291", "lat": 51.8275566, "lon": 5.7654672, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB031", "type": "BGP291", "lat": 51.8267388, "lon": 5.7675721, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "8.0", "lamptype": "LED", "jaar_van_aanleg": "2016.0", "kastgebied": "BB"}}, {"id": "BB031?", "type": "BGP291", "lat": 51.8276805, "lon": 5.7650909, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB032", "type": "BGP291", "lat": 51.8264781, "lon": 5.7674978, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB033", "type": "BGP291", "lat": 51.826252, "lon": 5.7673035, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB034", "type": "BGP291", "lat": 51.8260248, "lon": 5.7671103, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB035", "type": "BGP291", "lat": 51.8258003, "lon": 5.7669177, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB036", "type": "BGP291", "lat": 51.8255751, "lon": 5.7667253, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB037", "type": "BGP291", "lat": 51.8253493, "lon": 5.7665313, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB038", "type": "BGP291", "lat": 51.8251219, "lon": 5.7663374, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1999.0", "kastgebied": "BB"}}, {"id": "BB039", "type": "ESSENZ", "lat": 51.8248868, "lon": 5.766173, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "8.0", "lamptype": "LED", "jaar_van_aanleg": "2018.0", "kastgebied": "BB"}}, {"id": "BB046", "type": "BGP291", "lat": 51.8251248, "lon": 5.7619658, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BB"}}, {"id": "BB057", "type": "BGP291", "lat": 51.8260409, "lon": 5.7618372, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2019.0", "kastgebied": "BB"}}, {"id": "BB059", "type": "BGP291", "lat": 51.8264979, "lon": 5.7622274, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BB"}}, {"id": "BC009", "type": "BGP291", "lat": 51.8254254, "lon": 5.7588829, "source": "excel", "extra": {"straat": "Palkerplein", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2006.0", "kastgebied": "BC"}}, {"id": "BC010", "type": "BGP291", "lat": 51.8254976, "lon": 5.7593171, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC011", "type": "BGP291", "lat": 51.8254244, "lon": 5.7597566, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC013", "type": "BGP291", "lat": 51.8252799, "lon": 5.7606308, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC014", "type": "BGP291", "lat": 51.8251491, "lon": 5.7610491, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2025.0", "kastgebied": "BC"}}, {"id": "BC015", "type": "BGP291", "lat": 51.8251729, "lon": 5.761521, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC017", "type": "BGP291", "lat": 51.8250001, "lon": 5.7623939, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC018", "type": "BGP291", "lat": 51.8250342, "lon": 5.7628579, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC019", "type": "BGP291", "lat": 51.824993, "lon": 5.7633058, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC020", "type": "BGP291", "lat": 51.8249574, "lon": 5.7637536, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2005.0", "kastgebied": "BC"}}, {"id": "BC021", "type": "BGP291", "lat": 51.8249211, "lon": 5.7642012, "source": "excel", "extra": {"straat": "Bijsterhuizen 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC022", "type": "BGP291", "lat": 51.8253424, "lon": 5.7612435, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2017.0", "kastgebied": "BC"}}, {"id": "BC023", "type": "BGP291", "lat": 51.8255817, "lon": 5.7614455, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2025.0", "kastgebied": "BC"}}, {"id": "BC024", "type": "BGP291", "lat": 51.825855, "lon": 5.7615369, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2008.0", "kastgebied": "BC"}}, {"id": "BC026", "type": "BGP291", "lat": 51.8262699, "lon": 5.7620338, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC028", "type": "BGP291", "lat": 51.8267253, "lon": 5.7624221, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC029", "type": "BGP291", "lat": 51.8269543, "lon": 5.7626189, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1990.0", "kastgebied": "BC"}}, {"id": "BC030", "type": "BGP291", "lat": 51.8271818, "lon": 5.7628147, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC031", "type": "BGP291", "lat": 51.8274081, "lon": 5.7630067, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC032", "type": "BGP291", "lat": 51.8276374, "lon": 5.7632019, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC033", "type": "BGP291", "lat": 51.8278627, "lon": 5.7633947, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC034", "type": "BGP291", "lat": 51.8281371, "lon": 5.7634562, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC036", "type": "BGP291", "lat": 51.8278032, "lon": 5.7647164, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC037", "type": "BGP291", "lat": 51.8279265, "lon": 5.7643407, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2023.0", "kastgebied": "BC"}}, {"id": "BC038", "type": "BGP291", "lat": 51.8280458, "lon": 5.7638962, "source": "excel", "extra": {"straat": "nvt", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1990.0", "kastgebied": "BC"}}, {"id": "BC039", "type": "BGP291", "lat": 51.8282437, "lon": 5.7636464, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC040", "type": "BGP291", "lat": 51.8282963, "lon": 5.7632131, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC041", "type": "BGP291", "lat": 51.8284716, "lon": 5.7629655, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC042", "type": "BGP291", "lat": 51.8285312, "lon": 5.7624633, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2004.0", "kastgebied": "BC"}}, {"id": "BC043", "type": "BGP291", "lat": 51.8286456, "lon": 5.7620655, "source": "excel", "extra": {"straat": "Bijsterhuizen 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC053", "type": "BGP291", "lat": 51.8244967, "lon": 5.7585452, "source": "excel", "extra": {"straat": "Palkerplein", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC054", "type": "BGP291", "lat": 51.8244458, "lon": 5.7588804, "source": "excel", "extra": {"straat": "Palkerplein", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC055", "type": "BGP291", "lat": 51.8243983, "lon": 5.7592039, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC056", "type": "BGP291", "lat": 51.8243508, "lon": 5.7595376, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC057", "type": "BGP291", "lat": 51.8243043, "lon": 5.7598695, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC058", "type": "BGP291", "lat": 51.8242584, "lon": 5.7601943, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC059", "type": "BGP291", "lat": 51.8242202, "lon": 5.7605196, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC060", "type": "BGP291", "lat": 51.8241817, "lon": 5.7608442, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC061", "type": "BGP291", "lat": 51.8241447, "lon": 5.7611745, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC062", "type": "BGP291", "lat": 51.8241092, "lon": 5.761501, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC063", "type": "BGP291", "lat": 51.8240735, "lon": 5.7618289, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC064", "type": "BGP291", "lat": 51.8240378, "lon": 5.7621551, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC065", "type": "BGP291", "lat": 51.8240042, "lon": 5.7624843, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC066", "type": "BGP291", "lat": 51.8239725, "lon": 5.7628118, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC067", "type": "BGP291", "lat": 51.8239429, "lon": 5.7631435, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC068", "type": "BGP291", "lat": 51.8239166, "lon": 5.7634723, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC069", "type": "BGP291", "lat": 51.8238914, "lon": 5.7638046, "source": "excel", "extra": {"straat": "Palkerdijk", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "BC"}}, {"id": "BC073", "type": "ESS48S", "lat": 51.8240221, "lon": 5.7586536, "source": "excel", "extra": {"straat": "Palkerplein", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2017.0", "kastgebied": "BC"}}, {"id": "JE001", "type": "BGP291", "lat": 51.8280692, "lon": 5.7888438, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1983.0", "kastgebied": "JE"}}, {"id": "JE002", "type": "BGP291", "lat": 51.8277826, "lon": 5.7887492, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1983.0", "kastgebied": "JE"}}, {"id": "JE003", "type": "BGP291", "lat": 51.827669, "lon": 5.7883003, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1983.0", "kastgebied": "JE"}}, {"id": "JE004", "type": "BGP291", "lat": 51.8274046, "lon": 5.7880989, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1983.0", "kastgebied": "JE"}}, {"id": "JE005", "type": "BGP291", "lat": 51.8272789, "lon": 5.7876284, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2002.0", "kastgebied": "JE"}}, {"id": "JE006", "type": "BGP291", "lat": 51.827012, "lon": 5.787417, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE007", "type": "BGP291", "lat": 51.8269202, "lon": 5.7870106, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "9.0", "lamptype": "LED", "jaar_van_aanleg": "1983.0", "kastgebied": "JE"}}, {"id": "JE008", "type": "ESSENZ", "lat": 51.8266033, "lon": 5.7870017, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE009", "type": "BGP291", "lat": 51.8264325, "lon": 5.7867448, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE010", "type": "BGP291", "lat": 51.8261829, "lon": 5.7866354, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE011", "type": "BGP291", "lat": 51.8259478, "lon": 5.7865216, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE012", "type": "BGP291", "lat": 51.8258785, "lon": 5.7860996, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2015.0", "kastgebied": "JE"}}, {"id": "JE013", "type": "BGP291", "lat": 51.8258195, "lon": 5.7856769, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE014", "type": "ESSENZ", "lat": 51.8257605, "lon": 5.7852572, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE015", "type": "BGP291", "lat": 51.825719, "lon": 5.7849545, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE016", "type": "BGP291", "lat": 51.8260775, "lon": 5.7869414, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE017", "type": "BGP291", "lat": 51.8260194, "lon": 5.7873244, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE018", "type": "BGP291", "lat": 51.8261651, "lon": 5.7877367, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE019", "type": "BGP291", "lat": 51.8261276, "lon": 5.7881616, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE020", "type": "BGP291", "lat": 51.8261886, "lon": 5.7886025, "source": "excel", "extra": {"straat": "Kerkenbos 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2021.0", "kastgebied": "JE"}}, {"id": "JE028", "type": "BGP291", "lat": 51.8263467, "lon": 5.7888937, "source": "excel", "extra": {"straat": "Kerkenbos 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE029", "type": "BGP291", "lat": 51.8264887, "lon": 5.789161, "source": "excel", "extra": {"straat": "Kerkenbos 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE030", "type": "BGP291", "lat": 51.8267236, "lon": 5.7892643, "source": "excel", "extra": {"straat": "Kerkenbos 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE031", "type": "BGP291", "lat": 51.8269616, "lon": 5.7893593, "source": "excel", "extra": {"straat": "Kerkenbos 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE032", "type": "BGP291", "lat": 51.8271208, "lon": 5.7892105, "source": "excel", "extra": {"straat": "Kerkenbos 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE033", "type": "BGP291", "lat": 51.8273663, "lon": 5.7888461, "source": "excel", "extra": {"straat": "Kerkenbos 11", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JE034", "type": "BGP291", "lat": 51.8275482, "lon": 5.7885761, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JE"}}, {"id": "JF001", "type": "BGP291", "lat": 51.8272017, "lon": 5.7809152, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF002", "type": "BGP291", "lat": 51.8269176, "lon": 5.7806619, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF003", "type": "BGP291", "lat": 51.8267315, "lon": 5.7804926, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF004", "type": "BGP291", "lat": 51.8264766, "lon": 5.780354, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1996.0", "kastgebied": "JF"}}, {"id": "JF005", "type": "BGP291", "lat": 51.8264048, "lon": 5.78013, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2004.0", "kastgebied": "JF"}}, {"id": "JF006", "type": "BGP291", "lat": 51.8264771, "lon": 5.7797249, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF007", "type": "BGP291", "lat": 51.8264896, "lon": 5.7792873, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF008", "type": "BGP291", "lat": 51.826352, "lon": 5.7789146, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF009", "type": "BGP291", "lat": 51.8261264, "lon": 5.7786853, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "JF"}}, {"id": "JF010", "type": "BGP291", "lat": 51.8258909, "lon": 5.7784696, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF011", "type": "BGP291", "lat": 51.8256152, "lon": 5.7784762, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF012", "type": "BGP291", "lat": 51.8254307, "lon": 5.7787608, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF013", "type": "BGP291", "lat": 51.8252466, "lon": 5.779051, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF014", "type": "BGP291", "lat": 51.8251565, "lon": 5.7798542, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF015", "type": "ESSENZ", "lat": 51.8252764, "lon": 5.7803016, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF016", "type": "BGP291", "lat": 51.8252061, "lon": 5.7806799, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF017", "type": "BGP291", "lat": 51.8252287, "lon": 5.7810814, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF018", "type": "BGP291", "lat": 51.8252534, "lon": 5.7814912, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF019", "type": "BGP291", "lat": 51.8252717, "lon": 5.7818891, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF020", "type": "BGP291", "lat": 51.8252362, "lon": 5.7824338, "source": "excel", "extra": {"straat": "nvt", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF022", "type": "BGP291", "lat": 51.8254626, "lon": 5.7831346, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF023", "type": "BGP291", "lat": 51.8255215, "lon": 5.7835578, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF024", "type": "BGP291", "lat": 51.8255717, "lon": 5.7839119, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1996.0", "kastgebied": "JF"}}, {"id": "JF026", "type": "BGP291", "lat": 51.8255552, "lon": 5.7825016, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF027", "type": "BGP291", "lat": 51.8258005, "lon": 5.782384, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF028", "type": "BGP291", "lat": 51.8260923, "lon": 5.7825459, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF029", "type": "BGP291", "lat": 51.826289, "lon": 5.7827745, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2024.0", "kastgebied": "JF"}}, {"id": "JF030", "type": "BGP291", "lat": 51.8264648, "lon": 5.7830208, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF031", "type": "BGP291", "lat": 51.8266632, "lon": 5.7833183, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF032", "type": "BGP291", "lat": 51.8266748, "lon": 5.7837531, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF033", "type": "BGP291", "lat": 51.8266787, "lon": 5.7841739, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF034", "type": "BGP291", "lat": 51.826683, "lon": 5.784585, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF035", "type": "BGP291", "lat": 51.8268223, "lon": 5.7849304, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2014.0", "kastgebied": "JF"}}, {"id": "JF036", "type": "BGP291", "lat": 51.826987, "lon": 5.7852166, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2014.0", "kastgebied": "JF"}}, {"id": "JF038", "type": "BGP291", "lat": 51.8273316, "lon": 5.7858132, "source": "excel", "extra": {"straat": "Kerkenbos 13", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2014.0", "kastgebied": "JF"}}, {"id": "JF039", "type": "BGP291", "lat": 51.827156, "lon": 5.7862122, "source": "excel", "extra": {"straat": "nvt", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2014.0", "kastgebied": "JF"}}, {"id": "JF040", "type": "BGP291", "lat": 51.8269766, "lon": 5.7864827, "source": "excel", "extra": {"straat": "nvt", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2014.0", "kastgebied": "JF"}}, {"id": "JF041", "type": "BGP291", "lat": 51.8267974, "lon": 5.7867505, "source": "excel", "extra": {"straat": "nvt", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2014.0", "kastgebied": "JF"}}, {"id": "JF042", "type": "BGP291", "lat": 51.8260329, "lon": 5.7821702, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF043", "type": "ESSENZ", "lat": 51.8261116, "lon": 5.7817671, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF044", "type": "BGP291", "lat": 51.8261832, "lon": 5.7813645, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF045", "type": "BGP291", "lat": 51.8262566, "lon": 5.7809548, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF046", "type": "BGP291", "lat": 51.8263262, "lon": 5.7805748, "source": "excel", "extra": {"straat": "Kerkenbos 12", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "1994.0", "kastgebied": "JF"}}, {"id": "JF047", "type": "BGP291", "lat": 51.8252343, "lon": 5.7794034, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "JF"}}, {"id": "JG053", "type": "PKS", "lat": 51.8252913, "lon": 5.7833765, "source": "excel", "extra": {"straat": "Kerkenbos 10", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1996.0", "kastgebied": "JG"}}, {"id": "KA001", "type": "Symbol", "lat": 51.8251109, "lon": 5.7943048, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA002", "type": "BGP291", "lat": 51.8251994, "lon": 5.7942807, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "LED", "jaar_van_aanleg": "2018.0", "kastgebied": "KA"}}, {"id": "KA003", "type": "Symbol", "lat": 51.8251537, "lon": 5.7946567, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA004", "type": "BGP291", "lat": 51.825263, "lon": 5.7948117, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA005", "type": "Symbol", "lat": 51.8251838, "lon": 5.794928, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2017.0", "kastgebied": "KA"}}, {"id": "KA006", "type": "Symbol", "lat": 51.8250563, "lon": 5.795037, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA008", "type": "Symbol", "lat": 51.8252188, "lon": 5.795212, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA009", "type": "BGP291", "lat": 51.8253276, "lon": 5.7953499, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA010", "type": "Symbol", "lat": 51.8252558, "lon": 5.7955266, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2002.0", "kastgebied": "KA"}}, {"id": "KA011", "type": "BGP291", "lat": 51.8253923, "lon": 5.7958937, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA012", "type": "Symbol", "lat": 51.8252911, "lon": 5.7958398, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA013", "type": "BGP291", "lat": 51.8253928, "lon": 5.7963945, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA014", "type": "BGP291", "lat": 51.8254648, "lon": 5.7965683, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA016", "type": "Symbol", "lat": 51.8252525, "lon": 5.7967233, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA017", "type": "BGP291", "lat": 51.8252978, "lon": 5.7968727, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA018", "type": "Symbol", "lat": 51.8250677, "lon": 5.796964, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2000.0", "kastgebied": "KA"}}, {"id": "KA019", "type": "Symbol", "lat": 51.824913, "lon": 5.7970112, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA020", "type": "Symbol", "lat": 51.8247076, "lon": 5.7970744, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA021", "type": "Symbol", "lat": 51.8245307, "lon": 5.7971293, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2002.0", "kastgebied": "KA"}}, {"id": "KA022", "type": "Symbol", "lat": 51.8246249, "lon": 5.7972521, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2004.0", "kastgebied": "KA"}}, {"id": "KA023", "type": "Symbol", "lat": 51.8247278, "lon": 5.7973297, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA024", "type": "Symbol", "lat": 51.8247682, "lon": 5.7972289, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA025", "type": "Symbol", "lat": 51.8248944, "lon": 5.7972136, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA026", "type": "Symbol", "lat": 51.8249818, "lon": 5.7971625, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA027", "type": "Symbol", "lat": 51.8251413, "lon": 5.797113, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA028", "type": "Symbol", "lat": 51.8252718, "lon": 5.7972404, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA029", "type": "BGP291", "lat": 51.8254843, "lon": 5.7971543, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA030", "type": "BGP291", "lat": 51.825409, "lon": 5.7972768, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2008.0", "kastgebied": "KA"}}, {"id": "KA031", "type": "Symbol", "lat": 51.8253707, "lon": 5.7975267, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA032", "type": "Symbol", "lat": 51.825411, "lon": 5.7978942, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA033", "type": "BGP291", "lat": 51.8254878, "lon": 5.7978851, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2004.0", "kastgebied": "KA"}}, {"id": "KA034", "type": "Symbol", "lat": 51.8254246, "lon": 5.7982565, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2002.0", "kastgebied": "KA"}}, {"id": "KA035", "type": "BGP291", "lat": 51.8255071, "lon": 5.7984226, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA036", "type": "Symbol", "lat": 51.8254351, "lon": 5.7985943, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA037", "type": "Symbol", "lat": 51.8254401, "lon": 5.7989509, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA038", "type": "BGP291", "lat": 51.8255257, "lon": 5.7989526, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA039", "type": "Symbol", "lat": 51.825442, "lon": 5.7992893, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA040", "type": "BGP291", "lat": 51.8255145, "lon": 5.7994925, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA041", "type": "Symbol", "lat": 51.8254436, "lon": 5.7996371, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA042", "type": "Symbol", "lat": 51.8254462, "lon": 5.8000181, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2004.0", "kastgebied": "KA"}}, {"id": "KA043", "type": "BGP291", "lat": 51.825533, "lon": 5.8000212, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA044", "type": "Symbol", "lat": 51.8254488, "lon": 5.8003743, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA045", "type": "BGP291", "lat": 51.8255822, "lon": 5.8005539, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA046", "type": "Symbol", "lat": 51.8254816, "lon": 5.8008511, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA047", "type": "Symbol", "lat": 51.825516, "lon": 5.8011397, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA048", "type": "BGP291", "lat": 51.8256036, "lon": 5.8011118, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA049", "type": "Symbol", "lat": 51.8255432, "lon": 5.8014791, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA050", "type": "BGP291", "lat": 51.8256237, "lon": 5.8016705, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA051", "type": "Symbol", "lat": 51.8255582, "lon": 5.801861, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA052", "type": "BGP291", "lat": 51.8256442, "lon": 5.8022317, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA053", "type": "Symbol", "lat": 51.8255725, "lon": 5.802244, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA054", "type": "Symbol", "lat": 51.8255861, "lon": 5.8026155, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA055", "type": "BGP291", "lat": 51.8256634, "lon": 5.8027836, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA056", "type": "Symbol", "lat": 51.8255959, "lon": 5.8030033, "source": "excel", "extra": {"straat": "nvt", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA057", "type": "Symbol", "lat": 51.8255949, "lon": 5.8033461, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA058", "type": "BGP291", "lat": 51.8256687, "lon": 5.8033444, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA059", "type": "Symbol", "lat": 51.8256022, "lon": 5.8037225, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA060", "type": "BGP291", "lat": 51.8256777, "lon": 5.8039284, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA061", "type": "Symbol", "lat": 51.8256179, "lon": 5.804107, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA062", "type": "BGP291", "lat": 51.8257281, "lon": 5.8045045, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2008.0", "kastgebied": "KA"}}, {"id": "KA063", "type": "Symbol", "lat": 51.8256445, "lon": 5.8044938, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2003.0", "kastgebied": "KA"}}, {"id": "KA064", "type": "Symbol", "lat": 51.8256409, "lon": 5.8047883, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2003.0", "kastgebied": "KA"}}, {"id": "KA066", "type": "ALTRA2", "lat": 51.825671, "lon": 5.8051448, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2007.0", "kastgebied": "KA"}}, {"id": "KA067", "type": "BGP291", "lat": 51.8257568, "lon": 5.8049676, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "KA"}}, {"id": "KA068", "type": "", "lat": 51.8257501, "lon": 5.8051465, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA070", "type": "BGP291", "lat": 51.8257857, "lon": 5.8055002, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA071", "type": "Symbol", "lat": 51.8257298, "lon": 5.8055602, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2005.0", "kastgebied": "KA"}}, {"id": "KA072", "type": "Symbol", "lat": 51.8257753, "lon": 5.8058661, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA073", "type": "TZSB", "lat": 51.8259471, "lon": 5.8059808, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA074", "type": "Symbol", "lat": 51.8258229, "lon": 5.8061858, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA075", "type": "Symbol", "lat": 51.8258628, "lon": 5.8064708, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA076", "type": "BGP291", "lat": 51.8259137, "lon": 5.8064554, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA079", "type": "BGP291", "lat": 51.8260847, "lon": 5.8081956, "source": "excel", "extra": {"straat": "nvt", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2019.0", "kastgebied": "KA"}}, {"id": "KA080", "type": "BGP291", "lat": 51.8260658, "lon": 5.8077788, "source": "excel", "extra": {"straat": "nvt", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2005.0", "kastgebied": "KA"}}, {"id": "KA081", "type": "BGP291", "lat": 51.8260417, "lon": 5.8073648, "source": "excel", "extra": {"straat": "nvt", "hoogte": "5.5", "lamptype": "LED", "jaar_van_aanleg": "1981.0", "kastgebied": "KA"}}, {"id": "KA082", "type": "BGP291", "lat": 51.8260211, "lon": 5.8069451, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1974.0", "kastgebied": "KA"}}, {"id": "KA083", "type": "BGP291", "lat": 51.8260778, "lon": 5.8064338, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA084", "type": "Symbol", "lat": 51.8261204, "lon": 5.806428, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA085", "type": "BGP291", "lat": 51.8258672, "lon": 5.8060059, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2023.0", "kastgebied": "KA"}}, {"id": "KA087", "type": "Symbol", "lat": 51.826108, "lon": 5.8061015, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA088", "type": "BGP291", "lat": 51.8260551, "lon": 5.8059507, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA089", "type": "Symbol", "lat": 51.8260972, "lon": 5.80578, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA090", "type": "Symbol", "lat": 51.8260825, "lon": 5.8054597, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA091", "type": "BGP291", "lat": 51.8260328, "lon": 5.8054651, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA092", "type": "BGP291", "lat": 51.8258953, "lon": 5.8054835, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA093", "type": "Symbol", "lat": 51.8260642, "lon": 5.8050757, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA095", "type": "BGP291", "lat": 51.8258554, "lon": 5.804958, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA096", "type": "Symbol", "lat": 51.8260503, "lon": 5.8047602, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2018.0", "kastgebied": "KA"}}, {"id": "KA097", "type": "Symbol", "lat": 51.8260387, "lon": 5.804436, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA098", "type": "BGP291", "lat": 51.8259892, "lon": 5.8044412, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA099", "type": "Symbol", "lat": 51.8260242, "lon": 5.8040573, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA100", "type": "BGP291", "lat": 51.8259696, "lon": 5.8039074, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA101", "type": "Symbol", "lat": 51.8260111, "lon": 5.803691, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA102", "type": "BGP291", "lat": 51.8259487, "lon": 5.8033247, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA103", "type": "Symbol", "lat": 51.8259977, "lon": 5.8033198, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA104", "type": "Symbol", "lat": 51.8259849, "lon": 5.8029622, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA105", "type": "BGP291", "lat": 51.8259286, "lon": 5.8027655, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA106", "type": "Symbol", "lat": 51.8259712, "lon": 5.8025733, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA107", "type": "BGP291", "lat": 51.825908, "lon": 5.8022062, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA108", "type": "Symbol", "lat": 51.8259579, "lon": 5.8022012, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA109", "type": "Symbol", "lat": 51.8259441, "lon": 5.8018269, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA110", "type": "BGP291", "lat": 51.8258884, "lon": 5.8016462, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA111", "type": "Symbol", "lat": 51.8259309, "lon": 5.8014593, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA112", "type": "BGP291", "lat": 51.825868, "lon": 5.8010857, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA113", "type": "Symbol", "lat": 51.8259172, "lon": 5.8010804, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA114", "type": "Symbol", "lat": 51.8259039, "lon": 5.8007058, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA115", "type": "BGP291", "lat": 51.8258478, "lon": 5.8005302, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA116", "type": "Symbol", "lat": 51.8258908, "lon": 5.8003518, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA117", "type": "Symbol", "lat": 51.8258778, "lon": 5.7999908, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA118", "type": "BGP291", "lat": 51.8258288, "lon": 5.799996, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA119", "type": "Symbol", "lat": 51.825865, "lon": 5.7996268, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA120", "type": "BGP291", "lat": 51.8258101, "lon": 5.7994634, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA121", "type": "Symbol", "lat": 51.8258523, "lon": 5.7992769, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA122", "type": "Symbol", "lat": 51.8258397, "lon": 5.7989304, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA123", "type": "BGP291", "lat": 51.8257908, "lon": 5.7989338, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA124", "type": "Symbol", "lat": 51.8258276, "lon": 5.798568, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA125", "type": "BGP291", "lat": 51.8257714, "lon": 5.7983962, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA126", "type": "Symbol", "lat": 51.8258143, "lon": 5.7982165, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA127", "type": "Symbol", "lat": 51.8258013, "lon": 5.7978569, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA128", "type": "BGP291", "lat": 51.8257526, "lon": 5.7978608, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA129", "type": "BGP291", "lat": 51.8257837, "lon": 5.7972403, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA130", "type": "BGP291", "lat": 51.825678, "lon": 5.7971544, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA131", "type": "Symbol", "lat": 51.8258899, "lon": 5.7972281, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA132", "type": "Symbol", "lat": 51.8259518, "lon": 5.7970012, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA133", "type": "Symbol", "lat": 51.8260769, "lon": 5.7969736, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA134", "type": "Symbol", "lat": 51.8262701, "lon": 5.7969006, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA135", "type": "Symbol", "lat": 51.8264552, "lon": 5.796801, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA136", "type": "Symbol", "lat": 51.8260596, "lon": 5.7967077, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA137", "type": "BGP291", "lat": 51.8258739, "lon": 5.7967727, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2002.0", "kastgebied": "KA"}}, {"id": "KA138", "type": "Symbol", "lat": 51.8259342, "lon": 5.7966296, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA139", "type": "BGP291", "lat": 51.8256806, "lon": 5.7965496, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA140", "type": "Symbol", "lat": 51.8258408, "lon": 5.7964329, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA141", "type": "BGP291", "lat": 51.8257607, "lon": 5.7964366, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "2005.0", "kastgebied": "KA"}}, {"id": "KA142", "type": "Symbol", "lat": 51.8257265, "lon": 5.7960646, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA143", "type": "BGP291", "lat": 51.8256453, "lon": 5.7958214, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "10.0", "lamptype": "LED", "jaar_van_aanleg": "2003.0", "kastgebied": "KA"}}, {"id": "KA144", "type": "Symbol", "lat": 51.8256784, "lon": 5.7956592, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA145", "type": "Symbol", "lat": 51.8256299, "lon": 5.7952602, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA146", "type": "BGP291", "lat": 51.8255795, "lon": 5.7952757, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA147", "type": "Symbol", "lat": 51.8255934, "lon": 5.7949012, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA148", "type": "BGP291", "lat": 51.825517, "lon": 5.7947358, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA149", "type": "Symbol", "lat": 51.8255627, "lon": 5.7945387, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA150", "type": "BGP291", "lat": 51.8254823, "lon": 5.7941936, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "12.0", "lamptype": "LED", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA151", "type": "Symbol", "lat": 51.8255325, "lon": 5.7941819, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KA155", "type": "Symbol", "lat": 51.8255401, "lon": 5.8049392, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1995.0", "kastgebied": "KA"}}, {"id": "KF031", "type": "Symbol", "lat": 51.8262417, "lon": 5.7966637, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KF"}}, {"id": "KF032", "type": "Symbol", "lat": 51.8264268, "lon": 5.7966056, "source": "excel", "extra": {"straat": "Viaductweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KF"}}, {"id": "KF045", "type": "TownGuide", "lat": 51.8258254, "lon": 5.7949315, "source": "excel", "extra": {"straat": "de Voorstenkamp 17", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "1979.0", "kastgebied": "KF"}}, {"id": "KF070", "type": "Symbol", "lat": 51.8255355, "lon": 5.7931331, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KF"}}, {"id": "KG028", "type": "TownGuide", "lat": 51.8262932, "lon": 5.8049424, "source": "excel", "extra": {"straat": "Draaiom", "hoogte": "7.0", "lamptype": "LED", "jaar_van_aanleg": "1979.0", "kastgebied": "KG"}}, {"id": "KG029", "type": "BGP212", "lat": 51.8263078, "lon": 5.8053816, "source": "excel", "extra": {"straat": "Draaiom", "hoogte": "7.0", "lamptype": "LED", "jaar_van_aanleg": "1978.0", "kastgebied": "KG"}}, {"id": "KG033", "type": "TownGuide", "lat": 51.8259156, "lon": 5.8072933, "source": "excel", "extra": {"straat": "nvt", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2006.0", "kastgebied": "KG"}}, {"id": "KG034", "type": "TownGuide", "lat": 51.8257282, "lon": 5.8073665, "source": "excel", "extra": {"straat": "nvt", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2007.0", "kastgebied": "KG"}}, {"id": "KG035", "type": "BGP212", "lat": 51.8257922, "lon": 5.8071875, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "LED", "jaar_van_aanleg": "2011.0", "kastgebied": "KG"}}, {"id": "KG036", "type": "BGP212", "lat": 51.8257282, "lon": 5.8068174, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "LED", "jaar_van_aanleg": "2011.0", "kastgebied": "KG"}}, {"id": "KG037", "type": "", "lat": 51.8257057, "lon": 5.8064204, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "jaar_van_aanleg": "2011.0", "kastgebied": "KG"}}, {"id": "KG038", "type": "", "lat": 51.8256953, "lon": 5.8060293, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "jaar_van_aanleg": "1985.0", "kastgebied": "KG"}}, {"id": "KG039", "type": "TownGuide", "lat": 51.8262368, "lon": 5.8046212, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "1993.0", "kastgebied": "KG"}}, {"id": "KG163", "type": "BGP212", "lat": 51.8256473, "lon": 5.8056541, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "LED", "jaar_van_aanleg": "2019.0", "kastgebied": "KG"}}, {"id": "KG200", "type": "TownGuide", "lat": 51.8261523, "lon": 5.807204, "source": "excel", "extra": {"straat": "nvt", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2002.0", "kastgebied": "KG"}}, {"id": "KG202", "type": "TownGuide", "lat": 51.8263052, "lon": 5.8047095, "source": "excel", "extra": {"straat": "Draaiom", "hoogte": "4.0", "lamptype": "LED", "jaar_van_aanleg": "2007.0", "kastgebied": "KG"}}, {"id": "KL050", "type": "Agmi", "lat": 51.8242686, "lon": 5.7972381, "source": "excel", "extra": {"straat": "nvt", "hoogte": "5.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KL"}}, {"id": "KL051", "type": "Agmi", "lat": 51.8243226, "lon": 5.7972241, "source": "excel", "extra": {"straat": "nvt", "hoogte": "5.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KL"}}, {"id": "KL052", "type": "Agmi", "lat": 51.824356, "lon": 5.7971372, "source": "excel", "extra": {"straat": "nvt", "hoogte": "5.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KL"}}, {"id": "KV001", "type": "Symbol", "lat": 51.8250667, "lon": 5.7939403, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2007.0", "kastgebied": "KV"}}, {"id": "KV004", "type": "Symbol", "lat": 51.8250241, "lon": 5.793588, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV060", "type": "Symbol", "lat": 51.8255008, "lon": 5.7938071, "source": "excel", "extra": {"straat": "Wijchenseweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV095", "type": "Symbol", "lat": 51.8248769, "lon": 5.793347, "source": "excel", "extra": {"straat": "Spijkerhofweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV096", "type": "Symbol", "lat": 51.8246571, "lon": 5.7933973, "source": "excel", "extra": {"straat": "Spijkerhofweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV097", "type": "Symbol", "lat": 51.8244329, "lon": 5.7934563, "source": "excel", "extra": {"straat": "Spijkerhofweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV098", "type": "Symbol", "lat": 51.824214, "lon": 5.7935257, "source": "excel", "extra": {"straat": "Spijkerhofweg", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2004.0", "kastgebied": "KV"}}, {"id": "KV100", "type": "Symbol", "lat": 51.8245113, "lon": 5.7936229, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV101", "type": "Symbol", "lat": 51.8244468, "lon": 5.7937784, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV102", "type": "Symbol", "lat": 51.8245419, "lon": 5.79388, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV103", "type": "Symbol", "lat": 51.8244775, "lon": 5.794032, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV104", "type": "Symbol", "lat": 51.8245726, "lon": 5.7941355, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2006.0", "kastgebied": "KV"}}, {"id": "KV105", "type": "Symbol", "lat": 51.8245082, "lon": 5.7942877, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2004.0", "kastgebied": "KV"}}, {"id": "KV106", "type": "Symbol", "lat": 51.8246038, "lon": 5.7943917, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV107", "type": "Symbol", "lat": 51.8245389, "lon": 5.7945427, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV108", "type": "Symbol", "lat": 51.8246342, "lon": 5.7946469, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV109", "type": "Symbol", "lat": 51.8246645, "lon": 5.7949015, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV110", "type": "Symbol", "lat": 51.8246217, "lon": 5.7950958, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV111", "type": "Symbol", "lat": 51.8246572, "lon": 5.7953884, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV112", "type": "Symbol", "lat": 51.8247943, "lon": 5.7950597, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV113", "type": "Symbol", "lat": 51.8247836, "lon": 5.7953691, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "6.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV114", "type": "Symbol", "lat": 51.8247407, "lon": 5.795547, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV115", "type": "Symbol", "lat": 51.8247711, "lon": 5.7958006, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV116", "type": "Symbol", "lat": 51.8247083, "lon": 5.7959621, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV117", "type": "Symbol", "lat": 51.8248018, "lon": 5.7960573, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV118", "type": "Symbol", "lat": 51.8247384, "lon": 5.7962148, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV119", "type": "Symbol", "lat": 51.8248323, "lon": 5.7963129, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV120", "type": "Symbol", "lat": 51.824769, "lon": 5.7964631, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "2024.0", "kastgebied": "KV"}}, {"id": "KV121", "type": "Symbol", "lat": 51.8248631, "lon": 5.7965704, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV122", "type": "Symbol", "lat": 51.8247997, "lon": 5.7967195, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}, {"id": "KV123", "type": "Symbol", "lat": 51.8248939, "lon": 5.7968262, "source": "excel", "extra": {"straat": "Valkenaerhof", "hoogte": "4.0", "lamptype": "Conventioneel", "jaar_van_aanleg": "1994.0", "kastgebied": "KV"}}];
+    var polygonCoords = [[[[51.825865, 5.791152], [51.827632, 5.789693], [51.828153, 5.788947], [51.828067, 5.787435], [51.827599, 5.786324], [51.827026, 5.784838], [51.827009, 5.781856], [51.827669, 5.779721], [51.827649, 5.77897], [51.826508, 5.777612], [51.825985, 5.777183], [51.826349, 5.774796], [51.829055, 5.760785], [51.824104, 5.756992], [51.822922, 5.763213], [51.82444, 5.764314], [51.824552, 5.766782], [51.824506, 5.770408], [51.826296, 5.771331], [51.825473, 5.777156], [51.824826, 5.781208], [51.825801, 5.789522], [51.82582, 5.791965], [51.825484, 5.792893], [51.825562, 5.793657], [51.825457, 5.793797], [51.825084, 5.793869], [51.824952, 5.793164], [51.824071, 5.793437], [51.824493, 5.796661], [51.824188, 5.796962], [51.82436, 5.798013], [51.825315, 5.797842], [51.825646, 5.80842], [51.826442, 5.808313], [51.826097, 5.797541], [51.826504, 5.796858], [51.826472, 5.796597], [51.825862, 5.795493], [51.825775, 5.794143], [51.825541, 5.792917], [51.825864, 5.792071], [51.825865, 5.791152]]]];
+
+    // =========================================================================
+    // Map init
+    // =========================================================================
+    var map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([52.325, 4.761], 14);
+
+    var osmLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd'
+    }).addTo(map);
+
+    var aerialLayer = L.tileLayer(
+        'https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
+        { maxZoom: 19, attribution: '&copy; PDOK Luchtfoto' }
+    );
+
+    // Draw polygon boundary on map
+    var allPoints = [];
+    polygonCoords.forEach(function(rings) {
+        rings.forEach(function(ring) {
+            ring.forEach(function(p) { allPoints.push(p); });
+            L.polyline(ring.concat([ring[0]]), {
+                color: '#2266cc', weight: 2.5, opacity: 0.6,
+                dashArray: '8,6', fill: false
+            }).addTo(map);
+        });
+    });
+    if (allPoints.length > 0) {
+        map.fitBounds(L.latLngBounds(allPoints), { padding: [20, 20] });
+    }
+
+    // =========================================================================
+    // Container (asset) layers
+    // =========================================================================
+    var CONTAINER_COLORS = {"Verkeersbord": "#E53935", "Paal": "#FB8C00", "Bewegwijzeringsbord": "#8E24AA", "Obstakelbeveiliger": "#1E88E5", "Afvalbak": "#43A047", "Bank": "#F4511E", "Meubilair": "#00ACC1", "Mast": "#6D4C41", "Kast": "#795548"};
+    var CONTAINER_SHAPES = {};
+    var DEFAULT_COLOR = '#555';
+
+    // =========================================================================
+    // Custom shape markers (canvas-based, same performance as circleMarker)
+    // =========================================================================
+    L.ShapeMarker = L.CircleMarker.extend({
+        options: { shape: 'circle' },
+        _updatePath: function() {
+            var p = this._point;
+            var r = this._radius;
+            var ctx = this._renderer._ctx;
+            var shape = this.options.shape;
+
+            ctx.beginPath();
+            if (shape === 'triangle') {
+                ctx.moveTo(p.x, p.y - r);
+                ctx.lineTo(p.x + r, p.y + r * 0.7);
+                ctx.lineTo(p.x - r, p.y + r * 0.7);
+            } else if (shape === 'invtriangle') {
+                ctx.moveTo(p.x, p.y + r);
+                ctx.lineTo(p.x + r, p.y - r * 0.7);
+                ctx.lineTo(p.x - r, p.y - r * 0.7);
+            } else if (shape === 'square') {
+                var s = r * 0.8;
+                ctx.rect(p.x - s, p.y - s, s * 2, s * 2);
+            } else if (shape === 'diamond') {
+                ctx.moveTo(p.x, p.y - r);
+                ctx.lineTo(p.x + r * 0.7, p.y);
+                ctx.lineTo(p.x, p.y + r);
+                ctx.lineTo(p.x - r * 0.7, p.y);
+            } else if (shape === 'star') {
+                for (var i = 0; i < 5; i++) {
+                    var a1 = (i * 72 - 90) * Math.PI / 180;
+                    var a2 = ((i * 72) + 36 - 90) * Math.PI / 180;
+                    ctx.lineTo(p.x + Math.cos(a1) * r, p.y + Math.sin(a1) * r);
+                    ctx.lineTo(p.x + Math.cos(a2) * r * 0.45, p.y + Math.sin(a2) * r * 0.45);
+                }
+            } else {
+                // Default: circle
+                ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            }
+            ctx.closePath();
+            this._renderer._fillStroke(ctx, this);
+        }
+    });
+
+    var containerLayers = {};
+    var containerCounts = {};
+    var containerVisible = {};
+    var markerIndex = []; // {marker, lat, lon, id} for visit detection
+    var visited = new Set();
+    var VISITED_COLOR = '#34C759';
+    var totalDistanceM = 0;
+
+    function saveVisited() {
+        try { localStorage.setItem('visited', JSON.stringify(Array.from(visited))); } catch(e) {}
+    }
+
+    function updateVisitCounter() {
+        var km = (totalDistanceM / 1000).toFixed(1);
+        document.getElementById('visit-counter').textContent = '\u2713 ' + visited.size + ' / ' + containers.length + '  |  ' + km + ' km';
+    }
+
+    containers.forEach(function(c) {
+        var t = c.type || 'onbekend';
+        if (!containerLayers[t]) {
+            containerLayers[t] = L.layerGroup().addTo(map);
+            containerCounts[t] = 0;
+            containerVisible[t] = true;
+        }
+        containerCounts[t]++;
+
+        var isVisited = visited.has(c.id);
+        var color = isVisited ? VISITED_COLOR : DEFAULT_COLOR;
+        var shape = CONTAINER_SHAPES[t] || 'circle';
+        var m = new L.ShapeMarker([c.lat, c.lon], {
+            radius: 6, color: 'white', fillColor: color,
+            fillOpacity: 0.9, weight: 1.5, shape: shape
+        });
+
+        var html = '<div class="mob-popup"><div class="pop-title">' + t + '</div>';
+        if (c.extra) {
+            for (var k in c.extra) {
+                if (c.extra[k] !== null && c.extra[k] !== '') {
+                    html += '<div class="pop-row"><span class="pop-key">' + k + '</span><span class="pop-val">' + c.extra[k] + '</span></div>';
+                }
+            }
+        }
+        html += '<div class="pop-row"><span class="pop-key">lat/lon</span><span class="pop-val">' + c.lat.toFixed(5) + ', ' + c.lon.toFixed(5) + '</span></div>';
+        html += '</div>';
+        m.bindPopup(html);
+        containerLayers[t].addLayer(m);
+        markerIndex.push({marker: m, lat: c.lat, lon: c.lon, id: c.id});
+    });
+
+    updateVisitCounter();
+
+    function shapeIcon(shape, color) {
+        var s = '<svg width="16" height="16" viewBox="0 0 16 16">';
+        if (shape === 'triangle') {
+            s += '<polygon points="8,2 14,13 2,13" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'invtriangle') {
+            s += '<polygon points="8,14 14,3 2,3" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'square') {
+            s += '<rect x="2.5" y="2.5" width="11" height="11" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'diamond') {
+            s += '<polygon points="8,1 14,8 8,15 2,8" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        } else if (shape === 'star') {
+            s += '<polygon points="8,1 9.8,6 15,6.5 11,10.5 12.5,15 8,12 3.5,15 5,10.5 1,6.5 6.2,6" fill="' + color + '" stroke="white" stroke-width="0.8"/>';
+        } else {
+            s += '<circle cx="8" cy="8" r="6" fill="' + color + '" stroke="white" stroke-width="1"/>';
+        }
+        return s + '</svg>';
+    }
+
+    // =========================================================================
+    // Bottom sheet: asset toggles
+    // =========================================================================
+    var sheetContent = document.getElementById('sheet-content');
+
+    // Count subtypes per group
+    var subtypeCounts = {};
+    containers.forEach(function(c) {
+        var sub = c.extra && c.extra.subtype ? c.extra.subtype : c.type;
+        var group = c.type;
+        if (!subtypeCounts[group]) subtypeCounts[group] = {};
+        subtypeCounts[group][sub] = (subtypeCounts[group][sub] || 0) + 1;
+    });
+
+    // Split types into shaped (configured) and overig (circle/default)
+    var shapedTypes = [];
+    var overigTypes = [];
+    Object.keys(containerLayers).forEach(function(type) {
+        if (CONTAINER_SHAPES[type] && CONTAINER_SHAPES[type] !== 'circle') {
+            shapedTypes.push(type);
+        } else {
+            overigTypes.push(type);
+        }
+    });
+
+    function addSheetRow(label, shape, color, types) {
+        var count = 0;
+        types.forEach(function(t) { count += containerCounts[t] || 0; });
+
+        var wrapper = document.createElement('div');
+
+        var row = document.createElement('div');
+        row.className = 'asset-row';
+        row.innerHTML =
+            '<div class="asset-dot">' + shapeIcon(shape, color) + '</div>' +
+            '<div class="asset-label">' + label + '</div>' +
+            '<div class="asset-count-badge">' + count + '</div>' +
+            '<div class="toggle on"></div>';
+
+        // Build subtype detail panel
+        var detail = document.createElement('div');
+        detail.style.cssText = 'display:none;padding:0 0 8px 40px;font-size:13px;color:#666;';
+        var subs = {};
+        types.forEach(function(t) {
+            if (subtypeCounts[t]) {
+                for (var s in subtypeCounts[t]) {
+                    subs[s] = (subs[s] || 0) + subtypeCounts[t][s];
+                }
+            }
+        });
+        var subKeys = Object.keys(subs).sort(function(a, b) { return subs[b] - subs[a]; });
+        if (subKeys.length > 1 || (subKeys.length === 1 && subKeys[0] !== label)) {
+            subKeys.forEach(function(s) {
+                var line = document.createElement('div');
+                line.style.cssText = 'display:flex;justify-content:space-between;padding:2px 12px 2px 0;';
+                line.innerHTML = '<span>' + s + '</span><span style="color:#999;">' + subs[s] + '</span>';
+                detail.appendChild(line);
+            });
+        }
+
+        var visible = true;
+        var detailOpen = false;
+        row.addEventListener('click', function(e) {
+            // Toggle on the right side = visibility toggle
+            var rect = row.querySelector('.toggle').getBoundingClientRect();
+            if (e.clientX > rect.left - 20) {
+                visible = !visible;
+                row.querySelector('.toggle').classList.toggle('on', visible);
+                types.forEach(function(t) {
+                    containerVisible[t] = visible;
+                    if (visible) { containerLayers[t].addTo(map); }
+                    else { map.removeLayer(containerLayers[t]); }
+                });
+            } else {
+                // Click on label/icon = expand subtypes
+                detailOpen = !detailOpen;
+                detail.style.display = detailOpen ? 'block' : 'none';
+            }
+        });
+
+        wrapper.appendChild(row);
+        if (detail.children.length > 0) wrapper.appendChild(detail);
+        sheetContent.appendChild(wrapper);
+    }
+
+    shapedTypes.forEach(function(type) {
+        addSheetRow(type, CONTAINER_SHAPES[type], CONTAINER_COLORS[type] || DEFAULT_COLOR, [type]);
+    });
+    if (overigTypes.length > 0) {
+        addSheetRow('Overig', 'circle', DEFAULT_COLOR, overigTypes);
+    }
+
+    // =========================================================================
+    // Bottom sheet open/close
+    // =========================================================================
+    var sheet = document.getElementById('sheet');
+    var sheetOpen = false;
+
+    document.getElementById('sheet-handle').addEventListener('click', function() {
+        sheetOpen = !sheetOpen;
+        sheet.classList.toggle('open', sheetOpen);
+        document.body.classList.toggle('sheet-open', sheetOpen);
+    });
+
+    // =========================================================================
+    // GPS & Route tracking
+    // =========================================================================
+    var locationMarker = null;
+    var locationCircle = null;
+    var watchId = null;
+    var routePoints = [];
+    var routeLine = null;
+    var locating = false;
+    var wakeLock = null;
+    var lastGpsLat = null;
+    var lastGpsLon = null;
+    var debugLog = [];
+    var debugEl = document.getElementById('debug-panel');
+    function dbg(msg) {
+        var ts = new Date().toLocaleTimeString('nl-NL', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        debugLog.push(ts + ' ' + msg);
+        if (debugLog.length > 500) debugLog.shift();
+        debugEl.textContent = debugLog.join('\n');
+        debugEl.scrollTop = debugEl.scrollHeight;
+    }
+
+    function saveRoute() {
+        try { localStorage.setItem('routePoints', JSON.stringify(routePoints)); } catch(e) {}
+    }
+
+    function calcTotalDistance() {
+        totalDistanceM = 0;
+        for (var i = 1; i < routePoints.length; i++) {
+            totalDistanceM += haversineM(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+        }
+    }
+
+    // Resume or start fresh
+    function resumeRit(doResume) {
+        document.getElementById('resume-toast').classList.remove('show');
+        if (doResume) {
+            try {
+                var saved = JSON.parse(localStorage.getItem('routePoints') || '[]');
+                routePoints = saved.map(function(p) {
+                    if (Array.isArray(p)) return {lat: p[0], lon: p[1], t: 0};
+                    return p;
+                });
+            } catch(e) {}
+            try { JSON.parse(localStorage.getItem('visited') || '[]').forEach(function(id) { visited.add(id); }); } catch(e) {}
+            // Re-color visited markers
+            markerIndex.forEach(function(mi) {
+                if (visited.has(mi.id)) mi.marker.setStyle({fillColor: VISITED_COLOR});
+            });
+            calcTotalDistance();
+            // Restore route arrows
+            routeArrows.clearLayers();
+            arrowDistAcc = 0;
+            for (var i = 1; i < routePoints.length; i++) {
+                var segD = haversineM(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+                arrowDistAcc += segD;
+                if (arrowDistAcc >= 20) {
+                    addRouteArrow(routePoints[i-1].lat, routePoints[i-1].lon, routePoints[i].lat, routePoints[i].lon);
+                    arrowDistAcc = 0;
+                }
+            }
+            updateRouteLine();
+        } else {
+            routePoints = [];
+            visited.clear();
+            try { localStorage.removeItem('routePoints'); localStorage.removeItem('visited'); } catch(e) {}
+        }
+        updateVisitCounter();
+    }
+
+    // Check for saved rit on load
+    var hasSavedRit = false;
+    try {
+        var sr = JSON.parse(localStorage.getItem('routePoints') || '[]');
+        var sv = JSON.parse(localStorage.getItem('visited') || '[]');
+        hasSavedRit = sr.length > 0 || sv.length > 0;
+    } catch(e) {}
+    if (hasSavedRit) {
+        document.getElementById('resume-toast').classList.add('show');
+    }
+
+    function distToSegmentM(pLat, pLon, aLat, aLon, bLat, bLon) {
+        // Shortest distance from point P to line segment A-B (in meters)
+        // Project P onto AB, clamp to segment, return haversine distance
+        var dxAB = bLon - aLon, dyAB = bLat - aLat;
+        var dxAP = pLon - aLon, dyAP = pLat - aLat;
+        var lenSq = dxAB * dxAB + dyAB * dyAB;
+        if (lenSq === 0) return haversineM(pLat, pLon, aLat, aLon);
+        var t = Math.max(0, Math.min(1, (dxAP * dxAB + dyAP * dyAB) / lenSq));
+        var projLat = aLat + t * dyAB;
+        var projLon = aLon + t * dxAB;
+        return haversineM(pLat, pLon, projLat, projLon);
+    }
+
+    function haversineM(lat1, lon1, lat2, lon2) {
+        var R = 6371000;
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    var routeArrows = L.layerGroup().addTo(map);
+    var arrowDistAcc = 0; // accumulated distance since last arrow
+
+    function addRouteArrow(lat1, lon1, lat2, lon2) {
+        var angle = Math.atan2(lat2 - lat1, lon2 - lon1) * 180 / Math.PI;
+        var midLat = (lat1 + lat2) / 2;
+        var midLon = (lon1 + lon2) / 2;
+        var icon = L.divIcon({
+            className: '',
+            html: '<svg width="20" height="20" viewBox="0 0 20 20" style="transform:rotate(' + (90 - angle) + 'deg)"><path d="M10 2L17 14L10 11L3 14Z" fill="#CC2020" stroke="white" stroke-width="1.5"/></svg>',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
+        routeArrows.addLayer(L.marker([midLat, midLon], {icon: icon, interactive: false}));
+    }
+
+    function updateRouteLine() {
+        if (routePoints.length < 2) return;
+        var coords = routePoints.map(function(p) { return [p.lat, p.lon]; });
+        if (routeLine) {
+            routeLine.setLatLngs(coords);
+        } else {
+            routeLine = L.polyline(coords, {
+                color: '#FF3B30', weight: 4,
+                opacity: 0.85, lineJoin: 'round', lineCap: 'round'
+            }).addTo(map);
+        }
+    }
+
+    // Restore saved route on load
+    updateRouteLine();
+
+    document.getElementById('btn-locate').addEventListener('click', function() {
+        if (!navigator.geolocation) { alert('Geolocation niet beschikbaar.'); return; }
+        var btn = this;
+
+        if (locating) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+            locating = false;
+            btn.classList.remove('active', 'seeking');
+            if (locationMarker) { map.removeLayer(locationMarker); locationMarker = null; }
+            if (locationCircle) { map.removeLayer(locationCircle); locationCircle = null; }
+            // Release wake lock
+            if (wakeLock) { wakeLock.release().catch(function(){}); wakeLock = null; }
+            // Toast
+            var toast = document.getElementById('toast');
+            toast.textContent = 'GPS gestopt \u2014 ' + visited.size + ' van ' + containers.length + ' assets bezocht';
+            toast.classList.add('show');
+            setTimeout(function() { toast.classList.remove('show'); }, 4000);
+            return;
+        }
+
+        locating = true;
+        btn.classList.add('seeking');
+        var gpsStartTime = Date.now();
+
+        // Wake lock — keep screen on
+        if (navigator.wakeLock) {
+            navigator.wakeLock.request('screen').then(function(wl) { wakeLock = wl; }).catch(function(){});
+        }
+
+        watchId = navigator.geolocation.watchPosition(function(pos) {
+            var lat = pos.coords.latitude;
+            var lon = pos.coords.longitude;
+            var acc = pos.coords.accuracy;
+
+            // First fix: switch from seeking (orange) to active (green)
+            btn.classList.remove('seeking');
+            btn.classList.add('active');
+
+            if (locationMarker) {
+                locationMarker.setLatLng([lat, lon]);
+                locationCircle.setLatLng([lat, lon]).setRadius(acc);
+            } else {
+                locationMarker = L.circleMarker([lat, lon], {
+                    radius: 10, color: '#fff', weight: 2.5,
+                    fillColor: '#007AFF', fillOpacity: 1,
+                    zIndexOffset: 1000
+                }).addTo(map);
+                locationCircle = L.circle([lat, lon], {
+                    radius: acc, color: '#007AFF',
+                    fillColor: '#007AFF', fillOpacity: 0.1, weight: 1
+                }).addTo(map);
+                map.setView([lat, lon], 19);
+            }
+
+            map.panTo([lat, lon]);
+
+            dbg('GPS lat=' + lat.toFixed(6) + ' lon=' + lon.toFixed(6) + ' acc=' + acc.toFixed(1) + 'm');
+
+            // Filter: alleen goede punten toevoegen aan route
+            var dominated = false;
+            var filterReason = '';
+            if (Date.now() - gpsStartTime < 5000) { dominated = true; filterReason = 'warmup'; }
+            if (!dominated && acc > 25) { dominated = true; filterReason = 'acc>' + acc.toFixed(0); }
+            if (!dominated && routePoints.length > 0) {
+                var last = routePoints[routePoints.length - 1];
+                var dist = haversineM(last.lat, last.lon, lat, lon);
+                var dt = (pos.timestamp - last.t) / 1000;
+                if (dt > 0 && dist / dt > 11) { dominated = true; filterReason = 'speed>' + (dist/dt).toFixed(1); }
+                if (!dominated && dist < 3) { dominated = true; filterReason = 'dist<3 (' + dist.toFixed(1) + ')'; }
+            }
+            if (dominated) {
+                dbg('  ROUTE punt gefilterd: ' + filterReason);
+            } else {
+                var newPt = {lat: lat, lon: lon, t: pos.timestamp};
+                if (routePoints.length > 0) {
+                    var prev = routePoints[routePoints.length - 1];
+                    var segDist = haversineM(prev.lat, prev.lon, lat, lon);
+                    totalDistanceM += segDist;
+                    arrowDistAcc += segDist;
+                    if (arrowDistAcc >= 20) {
+                        addRouteArrow(prev.lat, prev.lon, lat, lon);
+                        arrowDistAcc = 0;
+                    }
+                }
+                routePoints.push(newPt);
+                updateRouteLine();
+                updateVisitCounter();
+                saveRoute();
+                dbg('  ROUTE punt geaccepteerd (#' + routePoints.length + ')');
+            }
+
+            // Visit detection: check proximity to line segment from last GPS position to current
+            var pLat = (lastGpsLat !== null) ? lastGpsLat : lat;
+            var pLon = (lastGpsLon !== null) ? lastGpsLon : lon;
+            var segLen = haversineM(pLat, pLon, lat, lon);
+            var changed = false;
+            var nearCount = 0;
+            for (var i = 0; i < markerIndex.length; i++) {
+                var mi = markerIndex[i];
+                if (visited.has(mi.id)) continue;
+                var d = distToSegmentM(mi.lat, mi.lon, pLat, pLon, lat, lon);
+                if (d <= 20) {
+                    nearCount++;
+                    if (d <= 8) {
+                        visited.add(mi.id);
+                        mi.marker.setStyle({fillColor: VISITED_COLOR});
+                        changed = true;
+                        dbg('  VISIT ' + mi.id.substring(0,12) + ' d=' + d.toFixed(1) + 'm type=' + (containers.find(function(c){return c.id===mi.id})||{}).type);
+                    } else {
+                        dbg('  DICHTBIJ ' + mi.id.substring(0,12) + ' d=' + d.toFixed(1) + 'm (>8m, niet bezocht)');
+                    }
+                }
+            }
+            dbg('  segment=' + segLen.toFixed(1) + 'm prev=' + pLat.toFixed(6) + ',' + pLon.toFixed(6) + ' nabij=' + nearCount);
+            if (changed) {
+                updateVisitCounter();
+                saveVisited();
+            }
+            lastGpsLat = lat;
+            lastGpsLon = lon;
+
+        }, function(err) {
+            alert('Locatie fout: ' + err.message);
+            locating = false;
+            btn.classList.remove('active', 'seeking');
+        }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    });
+
+    // Clear route
+    document.getElementById('btn-clear-route').addEventListener('click', function() {
+        if (routePoints.length === 0 && visited.size === 0) return;
+        if (!confirm('Gereden route en bezochte assets wissen?')) return;
+        routePoints = [];
+        totalDistanceM = 0;
+        arrowDistAcc = 0;
+        if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        routeArrows.clearLayers();
+        // Reset visited markers
+        visited.clear();
+        markerIndex.forEach(function(mi) {
+            mi.marker.setStyle({fillColor: DEFAULT_COLOR});
+        });
+        saveRoute();
+        saveVisited();
+        updateVisitCounter();
+    });
+
+    // Export results
+    document.getElementById('btn-export').addEventListener('click', function() {
+        var csv = 'id,type,subtype,lat,lon,bezocht\n';
+        containers.forEach(function(c) {
+            var sub = c.extra && c.extra.subtype ? c.extra.subtype : c.type;
+            var bez = visited.has(c.id) ? 'ja' : 'nee';
+            csv += c.id + ',' + c.type + ',' + sub + ',' + c.lat + ',' + c.lon + ',' + bez + '\n';
+        });
+
+        var blob = new Blob([csv], {type: 'text/csv'});
+        var fileName = 'inspectie_' + new Date().toISOString().slice(0,10) + '.csv';
+        var file = new File([blob], fileName, {type: 'text/csv'});
+
+        // Try Web Share API (native share menu)
+        if (navigator.canShare && navigator.canShare({files: [file]})) {
+            navigator.share({
+                title: 'Inspectie resultaten',
+                text: visited.size + ' van ' + containers.length + ' assets bezocht',
+                files: [file]
+            }).catch(function(){});
+        } else {
+            // Fallback: download
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = fileName;
+            a.click();
+        }
+    });
+
+    // Layer toggle
+    var showingAerial = false;
+    document.getElementById('btn-layers').addEventListener('click', function() {
+        if (showingAerial) {
+            map.removeLayer(aerialLayer);
+            osmLayer.addTo(map);
+        } else {
+            map.removeLayer(osmLayer);
+            aerialLayer.addTo(map);
+        }
+        showingAerial = !showingAerial;
+        // Toggle icon opacity to indicate active state
+        this.style.opacity = showingAerial ? '0.7' : '1';
+    });
+
+</script>
+</body>
+</html>
